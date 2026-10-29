@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.24
+-- BUILD 2026-10-29-1.6.25
 -- Place 75108253383447 · Universe 10767619742
 -- RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.24"
+local BUILD = "2026-10-29-1.6.25"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -1227,6 +1227,7 @@ local function revertFeatures()
 	state.touchOpen = false
 	state.locking = false
 	state.killPart = nil
+	state.killUser = nil
 	state.aimPoint = nil
 	state.aimPart = nil
 	state.killHop = nil
@@ -1444,7 +1445,8 @@ playerRoot = function(player)
 		end
 	end
 	local saved = state.lastBodies and state.lastBodies[player.UserId]
-	if saved and saved.part and saved.part.Parent and os.clock() - saved.at < 1.25 then
+	local keepFor = state.autoKill and 30 or 1.25
+	if saved and saved.part and saved.part.Parent and os.clock() - saved.at < keepFor then
 		return saved.part
 	end
 	return nil
@@ -1476,6 +1478,9 @@ local function nearestPlayer(origin)
 		if picked and picked ~= LocalPlayer then
 			local part = playerRoot(picked)
 			if part then
+				if state.autoKill then
+					state.killUser = picked.UserId
+				end
 				return part, picked.DisplayName
 			end
 		end
@@ -1493,6 +1498,9 @@ local function nearestPlayer(origin)
 					bestDist = dist
 					bestPart = part
 					bestName = player.DisplayName
+					if state.autoKill then
+						state.killUser = player.UserId
+					end
 				end
 			end
 		end
@@ -3029,6 +3037,17 @@ local function runCombat(root)
 			return
 		end
 		local part, label = nearestPlayer(root.Position)
+		if not part and state.killUser then
+			local locked = Players:GetPlayerByUserId(state.killUser)
+			local lockedPart = locked and playerRoot(locked)
+			if lockedPart then
+				part = lockedPart
+				label = locked.DisplayName
+			elseif locked and locked.Character and locked.Character.Parent and state.killPart and state.killPart.Parent then
+				part = state.killPart
+				label = state.killLabel or locked.DisplayName
+			end
+		end
 		if not part and state.killPart and state.killPart.Parent and os.clock() < (state.killGrace or 0) then
 			part = state.killPart
 			label = state.killLabel or "target"
@@ -3039,6 +3058,10 @@ local function runCombat(root)
 			state.aimPoint = nil
 			state.aimPart = nil
 			state.killFace = nil
+			local locked = state.killUser and Players:GetPlayerByUserId(state.killUser)
+			if not locked or not locked.Character or not locked.Character.Parent then
+				state.killUser = nil
+			end
 			local picked = selectedPlayer()
 			if (state.killSelected or picked) and now > (state.nextKillNote or 0) then
 				state.nextKillNote = now + 4
@@ -3054,7 +3077,7 @@ local function runCombat(root)
 		state.killPart = part
 		state.killLabel = label
 		state.killGrace = os.clock() + 0.8
-		if part == state.chaseMarker and now > (state.nextStream or 0) then
+		if now > (state.nextStream or 0) then
 			state.nextStream = now + 1
 			local streamPos = part.Position
 			task.spawn(function()
@@ -3062,6 +3085,10 @@ local function runCombat(root)
 					LocalPlayer:RequestStreamAroundAsync(streamPos)
 				end)
 			end)
+		end
+		local walkPush = root:FindFirstChild("VOIDZ_WalkBV")
+		if walkPush then
+			walkPush:Destroy()
 		end
 		placeBehind(root, part, false)
 		if state.lastTarget ~= label then
@@ -3431,7 +3458,7 @@ local function onHeartbeat()
 	if not character or not humanoid or not root then
 		return
 	end
-	if state.portalCf then
+	if state.portalCf and not state.autoKill then
 		if os.clock() < (state.portalUntil or 0) then
 			state.killPart = nil
 			state.aimPoint = nil
@@ -3518,7 +3545,7 @@ local function onHeartbeat()
 			clearFly(root)
 		end
 	end
-	if state.antiVoid and inPortal() then
+	if state.antiVoid and inPortal() and not state.autoKill then
 		if root.Position.Y > 8 and humanoid.FloorMaterial ~= Enum.Material.Air then
 			state.safe = root.CFrame
 		end
@@ -4853,7 +4880,7 @@ function renderPage()
 
 	if state.page == "PvP" then
 		heading(centerHolder, "Combat", nextOrder())
-		note(centerHolder, "Loops you behind the player and turns you to face them until you turn it off. You can still shoot, zoom, and click this off. Auto fire shoots for you.", nextOrder())
+		note(centerHolder, "Keeps teleporting you behind the player and turns you to face them until you turn it off. You can still shoot, zoom, and click this off. Auto fire shoots for you.", nextOrder())
 		toggleRow(centerHolder, "Auto kill", nextOrder(), state.autoKill, function()
 			if not state.autoKill and not requireGame() then
 				return
@@ -4861,6 +4888,7 @@ function renderPage()
 			state.autoKill = not state.autoKill
 			if not state.autoKill then
 				state.killPart = nil
+				state.killUser = nil
 				state.aimPoint = nil
 				state.aimPart = nil
 				state.killHop = nil
@@ -5583,7 +5611,7 @@ RunService:BindToRenderStep("VOIDZ_PORTAL_MAT", Enum.RenderPriority.Last.Value, 
 		pinMaterial(matRoot, state.matFocus)
 	end
 end)
-RunService:BindToRenderStep("VOIDZ_PORTAL_STICK", Enum.RenderPriority.Camera.Value + 5, function()
+RunService:BindToRenderStep("VOIDZ_PORTAL_STICK", Enum.RenderPriority.Last.Value + 1, function()
 	if not state.alive then
 		return
 	end
@@ -5591,6 +5619,45 @@ RunService:BindToRenderStep("VOIDZ_PORTAL_STICK", Enum.RenderPriority.Camera.Val
 		local _, homeHumanoid, homeRoot = characterParts()
 		if homeRoot and shouldGoHome(homeHumanoid) then
 			goHome(homeRoot)
+		end
+		return
+	end
+	if state.autoKill then
+		local ok, err = pcall(function()
+			local _, stickHumanoid, stickRoot = characterParts()
+			if not stickRoot then
+				return
+			end
+			local locked = state.killUser and Players:GetPlayerByUserId(state.killUser)
+			local part = locked and playerRoot(locked)
+			if not part or not part.Parent then
+				part = state.killPart
+			end
+			if not part or not part.Parent then
+				part = nearestPlayer(stickRoot.Position)
+			end
+			if not part or not part.Parent then
+				return
+			end
+			state.killPart = part
+			if stickHumanoid then
+				stickHumanoid.PlatformStand = false
+				stickHumanoid.AutoRotate = false
+			end
+			local walkPush = stickRoot:FindFirstChild("VOIDZ_WalkBV")
+			if walkPush then
+				walkPush:Destroy()
+			end
+			placeBehind(stickRoot, part, false)
+			if state.autoFire and os.clock() >= (state.nextHit or 0) then
+				state.nextHit = os.clock() + 0.1
+				clickAttack()
+			end
+		end)
+		if not ok and os.clock() > (state.nextErr or 0) then
+			state.nextErr = os.clock() + 5
+			pushLog("Kill aim failed")
+			warn("[VOIDZ] kill " .. tostring(err))
 		end
 		return
 	end
