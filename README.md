@@ -4,7 +4,7 @@
 loadstring(game:HttpGet("https://raw.githubusercontent.com/fungamer1234/voidz-portal/main/VOIDZ_PORTAL.lua", true))()
 ```
 
-Build `2026-10-29-1.6.10`
+Build `2026-10-29-1.6.11`
 
 Game: [Portal Sandbox](https://www.roblox.com/games/75108253383447/Portal-Sandbox). PlaceId `75108253383447`.
 
@@ -21,7 +21,7 @@ A copy of the same file is at `Documents/MacsploitUI/scripts/VOIDZ_PORTAL.lua` i
 Home lists every tab and the activity log. Click a row to open that tab. The open tab is marked in purple.
 
 - **Move.** Fly, noclip, walk speed, infinite jump, click teleport, and anti void.
-- **PvP.** Auto kill stays behind the target in third person and fires after the camera aims. A selected player is the only target, and the script waits when they are gone. Mech escape spams space while a mech is holding you. Home when hurt teleports you to your house spawn under the health percent you set.
+- **PvP.** Auto kill loops you a short distance behind the target and fires the weapon you have out. A selected player is the only target, and the script waits when they are gone. Mech escape spams space while a mech is holding you. Home when hurt teleports you to your house spawn under the health percent you set.
 - **Materials.** Auto collect stands on ground scrap, fires the pickup, and stays until the game takes it, then moves to the next closest. It skips chairs. Choose a material to grab only that type.
 - **Portals.** Lists worlds from the dimension menu and from world parts in the map. Press one to teleport there. It does not cycle through worlds.
 - **Visuals.** Client-side player highlights, fullbright, and field of view.

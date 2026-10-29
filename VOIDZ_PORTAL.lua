@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.10
+-- BUILD 2026-10-29-1.6.11
 -- Place 75108253383447 · Universe 10767619742
 -- RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.10"
+local BUILD = "2026-10-29-1.6.11"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -188,6 +188,11 @@ local function characterParts()
 	end
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	local root = character:FindFirstChild("HumanoidRootPart")
+		or character:FindFirstChild("Torso")
+		or character:FindFirstChild("UpperTorso")
+	if not root or not root:IsA("BasePart") then
+		root = character:FindFirstChildWhichIsA("BasePart", true)
+	end
 	return character, humanoid, root
 end
 
@@ -1199,30 +1204,112 @@ local function bodyPart(model)
 	if not model then
 		return nil
 	end
-	for _, name in ipairs({ "HumanoidRootPart", "Torso", "UpperTorso", "LowerTorso", "Head" }) do
-		local part = model:FindFirstChild(name)
+	if model:IsA("BasePart") then
+		return model
+	end
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		local ok, root = pcall(function()
+			return humanoid.RootPart
+		end)
+		if ok and root and root:IsA("BasePart") and root.Parent then
+			return root
+		end
+	end
+	for _, name in ipairs({ "HumanoidRootPart", "Torso", "UpperTorso", "LowerTorso", "Head", "Hitbox" }) do
+		local part = model:FindFirstChild(name, true)
 		if part and part:IsA("BasePart") then
 			return part
 		end
 	end
-	return model:FindFirstChildWhichIsA("BasePart", true)
+	local part = model:FindFirstChildWhichIsA("BasePart", true)
+	if part then
+		return part
+	end
+	local ok, list = pcall(function()
+		return model:GetDescendants()
+	end)
+	if ok then
+		for _, inst in ipairs(list) do
+			if inst:IsA("BasePart") then
+				return inst
+			end
+		end
+	end
+	return nil
 end
 
 playerRoot = function(player)
-	if not player then
+	if not player or player == LocalPlayer then
 		return nil
 	end
 	local model = player.Character
-	if not model or not model.Parent then
-		local named = workspace:FindFirstChild(player.Name)
-		if named and named:IsA("Model") then
-			model = named
+	if model and model.Parent then
+		local part = bodyPart(model)
+		if part then
+			return part
 		end
 	end
-	if not model or not model.Parent then
-		return nil
+	local now = os.clock()
+	local map = state.bodyMap
+	if not map or now - (state.bodyScan or 0) >= 0.35 then
+		map = {}
+		local seen = 0
+		local function take(candidate)
+			if not candidate:IsA("Model") then
+				return
+			end
+			local found = bodyPart(candidate)
+			if not found then
+				return
+			end
+			map[string.lower(candidate.Name)] = found
+			local humanoid = candidate:FindFirstChildOfClass("Humanoid")
+			if humanoid then
+				local ok, display = pcall(function()
+					return humanoid.DisplayName
+				end)
+				if ok and type(display) == "string" and display ~= "" then
+					map[string.lower(display)] = found
+				end
+			end
+			local owner = Players:GetPlayerFromCharacter(candidate)
+			if owner then
+				map["id:" .. tostring(owner.UserId)] = found
+			end
+		end
+		local function walk(folder, depth)
+			if depth > 4 or seen > 1500 then
+				return
+			end
+			for _, child in ipairs(folder:GetChildren()) do
+				seen = seen + 1
+				if child:IsA("Model") then
+					take(child)
+				end
+				if seen > 1500 then
+					return
+				end
+				if child:IsA("Folder") or child:IsA("Model") then
+					walk(child, depth + 1)
+				end
+			end
+		end
+		walk(workspace, 0)
+		state.bodyScan = now
+		state.bodyMap = map
 	end
-	return bodyPart(model)
+	local part = map["id:" .. tostring(player.UserId)]
+	if not part and player.Name ~= "" then
+		part = map[string.lower(player.Name)]
+	end
+	if not part and player.DisplayName and player.DisplayName ~= "" then
+		part = map[string.lower(player.DisplayName)]
+	end
+	if part and part.Parent then
+		return part
+	end
+	return nil
 end
 
 local function livingRoot(model)
@@ -1261,7 +1348,7 @@ local function nearestPlayer(origin)
 	local bestDist = math.huge
 	for _, player in ipairs(Players:GetPlayers()) do
 		if player ~= LocalPlayer and not sameTeam(player) then
-			local part = livingRoot(player.Character)
+			local part = playerRoot(player)
 			if part then
 				local dist = (part.Position - origin).Magnitude
 				if dist < bestDist then
@@ -1328,62 +1415,30 @@ end
 
 local GUN_HINTS = { "blaster", "laser", "mech", "pistol", "gun", "portal" }
 
-local function isGun(tool)
-	local name = string.lower(tool.Name)
-	for _, hint in ipairs(GUN_HINTS) do
-		if string.find(name, hint, 1, true) then
-			return true
-		end
-	end
-	return false
-end
-
-local function pointerOverHub()
-	if not window or not window.Visible then
-		return false
-	end
-	local pos = UserInputService:GetMouseLocation()
-	local origin = window.AbsolutePosition
-	local size = window.AbsoluteSize
-	return pos.X >= origin.X and pos.X <= origin.X + size.X and pos.Y >= origin.Y and pos.Y <= origin.Y + size.Y
-end
-
 local function ensureWeapon()
 	local character = LocalPlayer.Character
-	local _, humanoid = characterParts()
 	if character then
 		for _, child in ipairs(character:GetChildren()) do
-			if child:IsA("Tool") and isGun(child) then
+			if child:IsA("Tool") then
 				return child
 			end
 		end
 	end
+	local _, humanoid = characterParts()
 	local tool = findTool(GUN_HINTS)
+	if not tool then
+		local items = listTools()
+		tool = items[1]
+	end
 	if tool and humanoid then
 		pcall(function()
-			humanoid:UnequipTools()
 			humanoid:EquipTool(tool)
 		end)
 		if state.lastGun ~= tool.Name then
 			state.lastGun = tool.Name
-			pushLog("Gun " .. tool.Name)
+			pushLog("Weapon " .. tool.Name)
 		end
 		return tool
-	end
-	if os.clock() > (state.nextGunKey or 0) and not UserInputService:GetFocusedTextBox() then
-		state.nextGunKey = os.clock() + 1.2
-		pcall(function()
-			VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.X, false, game)
-			task.delay(0.06, function()
-				if not state.alive then
-					return
-				end
-				pcall(function()
-					VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.X, false, game)
-				end)
-			end)
-		end)
-		pushLog("Pulling mech blaster")
 	end
 	return nil
 end
@@ -1395,9 +1450,39 @@ local function clickAttack()
 			tool:Activate()
 		end)
 	end
-	if (not window or not window.Visible) and type(mouse1click) == "function" then
-		pcall(mouse1click)
+	if UserInputService:GetFocusedTextBox() then
+		return
 	end
+	local camera = workspace.CurrentCamera
+	local x, y = 80, 28
+	if camera then
+		x = math.max(20, camera.ViewportSize.X * 0.5)
+		y = 28
+	end
+	if window and window.Visible then
+		local origin = window.AbsolutePosition
+		local area = window.AbsoluteSize
+		local function inside(px, py)
+			return px >= origin.X and px <= origin.X + area.X and py >= origin.Y and py <= origin.Y + area.Y
+		end
+		if inside(x, y) then
+			x, y = 12, 12
+		end
+		if inside(x, y) then
+			return
+		end
+	end
+	pcall(function()
+		VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 0)
+		task.delay(0.03, function()
+			if not state.alive then
+				return
+			end
+			pcall(function()
+				VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
+			end)
+		end)
+	end)
 end
 
 local function holdKillCamera()
@@ -1439,7 +1524,7 @@ local function placeBehind(root, part, aimCamera)
 	else
 		flat = flat.Unit
 	end
-	local pos = part.Position - flat * 5 + Vector3.new(0, 1.5, 0)
+	local pos = part.Position - flat * 7 + Vector3.new(0, 2, 0)
 	local model = part.Parent
 	local torso = model and (model:FindFirstChild("UpperTorso") or model:FindFirstChild("Torso") or model:FindFirstChild("Head"))
 	local aim = (torso and torso:IsA("BasePart") and torso.Position) or (part.Position + Vector3.new(0, 1.2, 0))
@@ -2553,7 +2638,7 @@ local function runCombat(root)
 				if not picked then
 					pushLog("Pick a player on the right")
 				elseif picked.Character and picked.Character.Parent then
-					pushLog(picked.DisplayName .. " has not loaded")
+					pushLog("Can't see " .. picked.DisplayName .. " yet")
 				else
 					pushLog(picked.DisplayName .. " is down")
 				end
@@ -3771,7 +3856,7 @@ function renderPage()
 
 	if state.page == "PvP" then
 		heading(centerHolder, "Combat", nextOrder())
-		note(centerHolder, "Stays behind the target in third person and fires after the camera aims. A selected player is the only target, and it waits when they are gone.", nextOrder())
+		note(centerHolder, "Loops a short distance behind the target and fires the weapon you have out. A selected player is the only target, and it waits when they are gone.", nextOrder())
 		toggleRow(centerHolder, "Auto kill", nextOrder(), state.autoKill, function()
 			if not state.autoKill and not requireGame() then
 				return
@@ -4429,6 +4514,16 @@ RunService:BindToRenderStep("VOIDZ_PORTAL_STICK", Enum.RenderPriority.Camera.Val
 			goHome(homeRoot)
 		end
 		return
+	end
+	if state.autoKill then
+		local _, _, preRoot = characterParts()
+		if preRoot then
+			local part = nearestPlayer(preRoot.Position)
+			if part then
+				state.killPart = part
+				state.locking = true
+			end
+		end
 	end
 	if not state.killPart or not state.killPart.Parent then
 		return
