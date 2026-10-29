@@ -4,7 +4,7 @@
 loadstring(game:HttpGet("https://raw.githubusercontent.com/fungamer1234/voidz-portal/main/VOIDZ_PORTAL.lua", true))()
 ```
 
-Build `2026-10-29-1.6.5`
+Build `2026-10-29-1.6.6`
 
 Game: [Portal Sandbox](https://www.roblox.com/games/75108253383447/Portal-Sandbox). PlaceId `75108253383447`.
 
@@ -25,7 +25,7 @@ A copy of the same file is at `Documents/MacsploitUI/scripts/VOIDZ_PORTAL.lua` i
 - Equip tools that are already in your backpack.
 - Client-side player highlights, fullbright, and field of view.
 - Player list with teleport and spectate.
-- PvP auto kill stays behind the target and fires only after the camera is aimed at the torso. If a player is selected, it hunts only that player and waits when they die instead of switching to someone else.
+- PvP auto kill stays behind the target in third person and fires only after the camera is aimed at the torso. If a player is selected, it hunts only that player and waits when they die instead of switching to someone else.
 - Materials auto collect stands on ground scrap, fires the pickup, and stays until the game takes it, then moves to the next closest. It skips chairs. Choose a material to grab only that type. Auto IQ still only sits when auto collect is off.
 - Farm → Auto IQ sits you in the chair that gives IQ and stays there. It does not collect scrap or shoot. Auto quest reads the quest text and does it from anywhere: kill players, kill creatures, or collect scrap. There is no quest range.
 - Codes → Redeem all opens the in-game Codes tab, types codes you paste, and presses claim buttons that are not Robux purchases. The Oct 28 guide shows that tab and does not show a code string.

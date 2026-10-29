@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.5
+-- BUILD 2026-10-29-1.6.6
 -- Place 75108253383447 · Universe 10767619742
 -- RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.5"
+local BUILD = "2026-10-29-1.6.6"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -1118,6 +1118,8 @@ local function forcePickup(part, root)
 	stayOnMaterial(root, part)
 end
 
+local releaseKillCamera
+
 local function revertFeatures()
 	state.fly = false
 	state.noclip = false
@@ -1149,6 +1151,9 @@ local function revertFeatures()
 	state.aimPoint = nil
 	state.iqBusy = false
 	state.fovOn = false
+	if releaseKillCamera then
+		releaseKillCamera()
+	end
 	local camera = workspace.CurrentCamera
 	if camera and state.savedCamType ~= nil then
 		camera.CameraType = state.savedCamType
@@ -1346,6 +1351,37 @@ local function clickAttack()
 	end
 end
 
+local function holdKillCamera()
+	if state.savedMinZoom == nil then
+		state.savedMinZoom = LocalPlayer.CameraMinZoomDistance
+		state.savedMaxZoom = LocalPlayer.CameraMaxZoomDistance
+	end
+	if LocalPlayer.CameraMaxZoomDistance < 20 then
+		LocalPlayer.CameraMaxZoomDistance = 80
+	end
+	if LocalPlayer.CameraMinZoomDistance < 8 then
+		LocalPlayer.CameraMinZoomDistance = 8
+	end
+	if LocalPlayer.CameraMode == Enum.CameraMode.LockFirstPerson then
+		LocalPlayer.CameraMode = Enum.CameraMode.Classic
+	end
+end
+
+releaseKillCamera = function()
+	local wasKillCam = state.savedMinZoom ~= nil or state.savedMaxZoom ~= nil
+	if state.savedMinZoom ~= nil then
+		LocalPlayer.CameraMinZoomDistance = state.savedMinZoom
+		state.savedMinZoom = nil
+	end
+	if state.savedMaxZoom ~= nil then
+		LocalPlayer.CameraMaxZoomDistance = state.savedMaxZoom
+		state.savedMaxZoom = nil
+	end
+	if wasKillCam and LocalPlayer.CameraMode == Enum.CameraMode.LockFirstPerson then
+		LocalPlayer.CameraMode = Enum.CameraMode.Classic
+	end
+end
+
 local function placeBehind(root, part, aimCamera)
 	local look = part.CFrame.LookVector
 	local flat = Vector3.new(look.X, 0, look.Z)
@@ -1367,8 +1403,23 @@ local function placeBehind(root, part, aimCamera)
 	if aimCamera then
 		local camera = workspace.CurrentCamera
 		if camera then
-			local eye = pos + Vector3.new(0, 1.5, 0)
+			local back = aim - pos
+			if back.Magnitude < 0.05 then
+				back = flat
+			else
+				back = back.Unit
+			end
+			local eye = pos - back * 12 + Vector3.new(0, 3, 0)
 			camera.CFrame = CFrame.lookAt(eye, aim)
+			holdKillCamera()
+			local character = root.Parent
+			if character then
+				for _, inst in ipairs(character:GetDescendants()) do
+					if inst:IsA("BasePart") or inst:IsA("Decal") then
+						inst.LocalTransparencyModifier = 0
+					end
+				end
+			end
 		end
 	end
 end
@@ -2609,9 +2660,12 @@ local function onHeartbeat()
 			state.savedRotate = humanoid.AutoRotate
 		end
 		humanoid.AutoRotate = false
-	elseif state.savedRotate ~= nil then
-		humanoid.AutoRotate = state.savedRotate
-		state.savedRotate = nil
+	else
+		if state.savedRotate ~= nil then
+			humanoid.AutoRotate = state.savedRotate
+			state.savedRotate = nil
+		end
+		releaseKillCamera()
 	end
 	if state.autoBuild and inPortal() and not state.locking and not state.iqBusy then
 		local now = os.clock()
@@ -3250,7 +3304,7 @@ function renderPage()
 	end
 
 	if state.page == "PvP" then
-		note(centerHolder, "Auto kill stays on the target and fires after the camera is aimed, so the shot hits. If you select a player, it only hunts that player and waits when they die. It does not switch to someone else.", nextOrder())
+		note(centerHolder, "Auto kill stays on the target and fires after the camera is aimed, so the shot hits. The camera stays in third person. If you select a player, it only hunts that player and waits when they die. It does not switch to someone else.", nextOrder())
 		toggleRow(centerHolder, "Auto kill", nextOrder(), state.autoKill, function()
 			if not state.autoKill and not requireGame() then
 				return
@@ -3260,6 +3314,7 @@ function renderPage()
 				state.killPart = nil
 				state.aimPoint = nil
 				state.locking = false
+				releaseKillCamera()
 				local camera = workspace.CurrentCamera
 				if camera and state.savedCamType ~= nil then
 					camera.CameraType = state.savedCamType
