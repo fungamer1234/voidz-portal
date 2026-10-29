@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.3.0
+-- BUILD 2026-10-29-1.4.0
 -- Place 75108253383447 · Universe 10767619742
 -- RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.3.0"
+local BUILD = "2026-10-29-1.4.0"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -80,6 +80,13 @@ local state = {
 	autoKill = false,
 	autoFarm = false,
 	autoQuest = false,
+	autoIq = false,
+	iqKills = true,
+	iqBusy = false,
+	iqText = "not found",
+	iqSource = "",
+	iqLast = nil,
+	iqTried = {},
 	questAny = false,
 	killSelected = false,
 	skipTeam = true,
@@ -985,6 +992,8 @@ local function revertFeatures()
 	state.autoKill = false
 	state.autoFarm = false
 	state.autoQuest = false
+	state.autoIq = false
+	state.iqBusy = false
 	state.autoBuild = false
 	state.autoMat = false
 	state.locking = false
@@ -1252,6 +1261,318 @@ local function runQuest(root)
 	end
 end
 
+local function mentionsIq(text)
+	text = string.lower(tostring(text or ""))
+	if text == "" then
+		return false
+	end
+	if string.find(text, "intellect", 1, true) or string.find(text, "brain", 1, true) then
+		return true
+	end
+	if string.find(text, "iqxp", 1, true) or string.find(text, "iq_xp", 1, true) or string.find(text, "iq xp", 1, true) then
+		return true
+	end
+	if string.match(text, "^iq$") or string.match(text, "^iq[^%a]") or string.match(text, "[^%a]iq$") or string.match(text, "[^%a]iq[^%a]") or string.match(text, "iq$") then
+		return true
+	end
+	return false
+end
+
+local function numberFrom(value)
+	if typeof(value) == "number" then
+		return value
+	end
+	local digits = string.match(tostring(value or ""), "[-+]?%d+%.?%d*")
+	if not digits then
+		return nil
+	end
+	return tonumber(digits)
+end
+
+local function readValueObject(obj, source)
+	if not (obj:IsA("IntValue") or obj:IsA("NumberValue") or obj:IsA("StringValue")) then
+		return nil
+	end
+	if not mentionsIq(obj.Name) then
+		return nil
+	end
+	return tostring(obj.Value), numberFrom(obj.Value), source
+end
+
+local function scanValueFolder(folder, prefix, depth)
+	if not folder or depth > 2 then
+		return nil
+	end
+	for _, child in ipairs(folder:GetChildren()) do
+		local text, number, source = readValueObject(child, prefix .. child.Name)
+		if text then
+			return text, number, source
+		end
+		if child:IsA("Folder") or child:IsA("Configuration") then
+			local nestedText, nestedNumber, nestedSource = scanValueFolder(child, prefix .. child.Name .. ".", depth + 1)
+			if nestedText then
+				return nestedText, nestedNumber, nestedSource
+			end
+		end
+	end
+	return nil
+end
+
+local function readIq()
+	local stats = LocalPlayer:FindFirstChild("leaderstats")
+	if stats then
+		local text, number, source = scanValueFolder(stats, "leaderstats.", 1)
+		if text then
+			return text, number, source
+		end
+	end
+	local ok, attrs = pcall(function()
+		return LocalPlayer:GetAttributes()
+	end)
+	if ok and type(attrs) == "table" then
+		for name, value in pairs(attrs) do
+			if mentionsIq(name) then
+				return tostring(value), numberFrom(value), "attribute." .. tostring(name)
+			end
+		end
+	end
+	local text, number, source = scanValueFolder(LocalPlayer, "player.", 0)
+	if text then
+		return text, number, source
+	end
+	local seen = 0
+	for _, inst in ipairs(PlayerGui:GetDescendants()) do
+		seen = seen + 1
+		if seen > 800 then
+			break
+		end
+		if gui and inst:IsDescendantOf(gui) then
+			continue
+		end
+		if inst:IsA("TextLabel") or inst:IsA("TextButton") then
+			local blob = inst.Name .. " " .. (inst.Parent and inst.Parent.Name or "") .. " " .. inst.Text
+			if mentionsIq(blob) then
+				local amount = numberFrom(inst.Text)
+				if amount then
+					return inst.Text, amount, "gui." .. inst.Name
+				end
+			end
+		end
+	end
+	return nil, nil, nil
+end
+
+local function rememberIq(text, number, source)
+	state.iqText = text or "not found"
+	state.iqSource = source or ""
+	if number and state.iqLast ~= nil and number ~= state.iqLast then
+		pushLog("IQ " .. tostring(state.iqLast) .. " → " .. tostring(number) .. " (" .. state.iqSource .. ")")
+	elseif number and state.iqLast == nil then
+		pushLog("IQ " .. tostring(number) .. " (" .. state.iqSource .. ")")
+	end
+	if number then
+		state.iqLast = number
+	end
+end
+
+local function refreshIq()
+	local text, number, source = readIq()
+	if text then
+		rememberIq(text, number, source)
+	else
+		state.iqText = "not found"
+		state.iqSource = ""
+	end
+end
+
+local iqWorld = { at = 0, inst = nil, pos = nil, label = nil }
+
+local function iqPoint(inst)
+	if inst:IsA("BasePart") then
+		return inst.Position
+	end
+	if inst:IsA("Model") then
+		local part = inst.PrimaryPart or inst:FindFirstChildWhichIsA("BasePart")
+		if part then
+			return part.Position
+		end
+	end
+	if inst:IsA("ProximityPrompt") then
+		return promptPosition(inst)
+	end
+	if inst:IsA("ClickDetector") then
+		local parent = inst.Parent
+		if parent and parent:IsA("BasePart") then
+			return parent.Position
+		end
+	end
+	if inst:IsA("Attachment") then
+		return inst.WorldPosition
+	end
+	return nil
+end
+
+local function ownedByPlayer(inst)
+	local model = inst:FindFirstAncestorOfClass("Model")
+	return model ~= nil and Players:GetPlayerFromCharacter(model) ~= nil
+end
+
+local function findIqWorld(origin)
+	local now = os.clock()
+	if now - iqWorld.at < 2 and iqWorld.inst and iqWorld.inst.Parent and iqWorld.pos then
+		return iqWorld.inst, iqWorld.pos, iqWorld.label
+	end
+	local best = nil
+	local bestPos = nil
+	local bestLabel = nil
+	local bestDist = 1200
+	local seen = 0
+	for _, inst in ipairs(workspace:GetDescendants()) do
+		seen = seen + 1
+		if seen > 2200 then
+			break
+		end
+		if inst:IsDescendantOf(workspace) and not ownedByPlayer(inst) then
+			local folder = inst:FindFirstAncestor(BUILD_FOLDER)
+			if not folder and (inst:IsA("BasePart") or inst:IsA("Model") or inst:IsA("ProximityPrompt") or inst:IsA("ClickDetector")) then
+				local blob = inst.Name
+				if inst:IsA("ProximityPrompt") then
+					blob = blob .. " " .. inst.ActionText .. " " .. inst.ObjectText
+				end
+				if mentionsIq(blob) then
+					local pos = iqPoint(inst)
+					if pos then
+						local dist = (pos - origin).Magnitude
+						local triedAt = state.iqTried[inst]
+						if triedAt and now - triedAt < 5 then
+							dist = dist + 400
+						end
+						if dist < bestDist then
+							bestDist = dist
+							best = inst
+							bestPos = pos
+							bestLabel = inst.Name
+						end
+					end
+				end
+			end
+		end
+	end
+	iqWorld.at = now
+	iqWorld.inst = best
+	iqWorld.pos = bestPos
+	iqWorld.label = bestLabel
+	return best, bestPos, bestLabel
+end
+
+local function useIqTarget(inst, root, pos)
+	root.CFrame = CFrame.lookAt(pos + Vector3.new(0, 3, 0), pos)
+	pcall(function()
+		root.AssemblyLinearVelocity = Vector3.zero
+	end)
+	if inst:IsA("ProximityPrompt") then
+		firePrompt(inst)
+	elseif inst:IsA("ClickDetector") and type(fireclickdetector) == "function" then
+		pcall(fireclickdetector, inst)
+	else
+		fireCollect(inst, root)
+	end
+	state.iqTried[inst] = os.clock()
+end
+
+local function iqButtonBlob(inst)
+	local text = ""
+	if inst:IsA("TextButton") then
+		text = inst.Text
+	end
+	return string.lower(inst.Name .. " " .. text .. " " .. (inst.Parent and inst.Parent.Name or ""))
+end
+
+local function pressIqButton()
+	local seen = 0
+	for _, inst in ipairs(PlayerGui:GetDescendants()) do
+		seen = seen + 1
+		if seen > 800 then
+			break
+		end
+		if gui and inst:IsDescendantOf(gui) then
+			continue
+		end
+		if (inst:IsA("TextButton") or inst:IsA("ImageButton")) and inst.Visible then
+			local blob = iqButtonBlob(inst)
+			local paid = string.find(blob, "buy", 1, true)
+				or string.find(blob, "shop", 1, true)
+				or string.find(blob, "robux", 1, true)
+				or string.find(blob, "vip", 1, true)
+				or string.find(blob, "pass", 1, true)
+				or string.find(blob, "purchase", 1, true)
+			if mentionsIq(blob) and not paid then
+				local pos = inst.AbsolutePosition
+				local size = inst.AbsoluteSize
+				local x = pos.X + size.X * 0.5
+				local y = pos.Y + size.Y * 0.5
+				pcall(function()
+					VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 0)
+				end)
+				task.delay(0.05, function()
+					if not state.alive then
+						return
+					end
+					pcall(function()
+						VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
+					end)
+				end)
+				return inst.Name
+			end
+		end
+	end
+	return nil
+end
+
+local function runIq(root)
+	if not state.autoIq or not inPortal() then
+		state.iqBusy = false
+		return
+	end
+	local now = os.clock()
+	if now >= (state.nextIqRead or 0) then
+		state.nextIqRead = now + 0.6
+		refreshIq()
+	end
+	if now < (state.nextIq or 0) then
+		return
+	end
+	state.nextIq = now + 0.85
+	if state.autoMat then
+		state.iqBusy = false
+		return
+	end
+	local inst, pos, label = findIqWorld(root.Position)
+	if inst and pos then
+		state.iqBusy = true
+		state.locking = true
+		useIqTarget(inst, root, pos)
+		if state.lastIqTarget ~= label then
+			state.lastIqTarget = label
+			pushLog("IQ object " .. tostring(label))
+		end
+		return
+	end
+	state.iqBusy = false
+	if now >= (state.nextIqClick or 0) then
+		state.nextIqClick = now + 3
+		local button = pressIqButton()
+		if button and state.lastIqButton ~= button then
+			state.lastIqButton = button
+			pushLog("IQ button " .. button)
+		end
+	end
+	if not state.iqKills and now > (state.nextIqNote or 0) then
+		state.nextIqNote = now + 6
+		pushLog("IQ " .. state.iqText .. ". No IQ pickup in this server")
+	end
+end
+
 local function runCombat(root)
 	if not inPortal() then
 		state.locking = false
@@ -1262,7 +1583,12 @@ local function runCombat(root)
 		state.nextQuest = now + 1.15
 		runQuest(root)
 	end
-	if not state.autoKill and not state.autoFarm then
+	if state.iqBusy then
+		state.locking = true
+		return
+	end
+	local iqGrind = state.autoIq and state.iqKills
+	if not state.autoKill and not state.autoFarm and not iqGrind then
 		state.locking = false
 		return
 	end
@@ -1277,7 +1603,7 @@ local function runCombat(root)
 	state.nextHit = now + 0.32
 	local part = nil
 	local label = nil
-	if state.autoKill or (state.autoFarm and state.farmPlayers) then
+	if state.autoKill or (state.autoFarm and state.farmPlayers) or iqGrind then
 		part, label = nearestPlayer(root.Position)
 	end
 	if not part and state.autoFarm then
@@ -1285,6 +1611,10 @@ local function runCombat(root)
 	end
 	if not part then
 		state.locking = false
+		if iqGrind and now > (state.nextIqNote or 0) then
+			state.nextIqNote = now + 6
+			pushLog("IQ " .. state.iqText .. ". No player in range")
+		end
 		return
 	end
 	state.locking = true
@@ -1351,7 +1681,8 @@ local function onHeartbeat()
 			root.CFrame = state.safe
 		end
 	end
-	if state.autoRegen and inPortal() and humanoid.Health > 0 and humanoid.MaxHealth > 0 then
+	runIq(root)
+	if (state.autoRegen or state.autoIq) and inPortal() and humanoid.Health > 0 and humanoid.MaxHealth > 0 then
 		if humanoid.Health < humanoid.MaxHealth * 0.45 then
 			if (state.lastRegen or 0) + 1.4 < os.clock() then
 				state.lastRegen = os.clock()
@@ -1677,7 +2008,7 @@ function renderPage()
 	if state.page == "Home" then
 		local where = inPortal() and "Portal Sandbox is loaded." or "This place is not Portal Sandbox. Join the game, then execute again."
 		note(centerHolder, where .. " PlaceId " .. tostring(game.PlaceId) .. ". Build " .. BUILD .. ".", nextOrder())
-		note(centerHolder, "RightShift hides the hub. Materials scans the map, teleports you to the closest selected material, picks it up, then goes to the next one.", nextOrder())
+		note(centerHolder, "RightShift hides the hub. Materials collects map parts. Farm reads your IQ and uses an IQ pickup when the game has one.", nextOrder())
 		for _, line in ipairs(logs) do
 			local row = Instance.new("TextLabel")
 			row.BackgroundColor3 = C.card
@@ -1874,6 +2205,39 @@ function renderPage()
 	end
 
 	if state.page == "Farm" then
+		local iqLine = "IQ: " .. tostring(state.iqText)
+		if state.iqSource ~= "" then
+			iqLine = iqLine .. "  ·  " .. state.iqSource
+		end
+		note(centerHolder, iqLine, nextOrder())
+		note(centerHolder, "VIP lists 2x IQ XP next to 2x kill money. Public pages never say which action grants IQ, and this hub does not call a guessed remote. Auto IQ reads leaderstats, attributes, and the HUD. If the map has an IQ prompt or pickup, it teleports there and uses it. Grind nearest player is the kill loop, because kills are the only payout the game describes.", nextOrder())
+		toggleRow(centerHolder, "Auto IQ", nextOrder(), state.autoIq, function()
+			if not state.autoIq and not requireGame() then
+				return
+			end
+			state.autoIq = not state.autoIq
+			if state.autoIq then
+				refreshIq()
+			else
+				state.iqBusy = false
+			end
+			pushLog(state.autoIq and ("Auto IQ on · " .. state.iqText) or "Auto IQ off")
+			renderPage()
+		end)
+		toggleRow(centerHolder, "Grind nearest player", nextOrder(), state.iqKills, function()
+			state.iqKills = not state.iqKills
+			pushLog(state.iqKills and "IQ farm also grinds the nearest player" or "IQ farm only uses IQ objects")
+			renderPage()
+		end)
+		actionButton(centerHolder, "Refresh IQ", nextOrder(), function()
+			refreshIq()
+			if state.iqSource ~= "" then
+				pushLog("IQ " .. state.iqText .. " (" .. state.iqSource .. ")")
+			else
+				pushLog("No IQ stat on the player or HUD")
+			end
+			renderPage()
+		end)
 		note(centerHolder, "Auto farm hunts NPC humanoids, then players if that option is on. Auto quest teleports to a nearby prompt named quest, bounty, reward, claim, or mission and fires it. Bounties were announced as upcoming, so a prompt has to exist in the server.", nextOrder())
 		toggleRow(centerHolder, "Auto farm", nextOrder(), state.autoFarm, function()
 			if not state.autoFarm and not requireGame() then
