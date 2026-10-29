@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.29
+-- BUILD 2026-10-29-1.6.30
 -- Place 75108253383447 · Universe 10767619742
 -- The picture button or RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.29"
+local BUILD = "2026-10-29-1.6.30"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -5439,49 +5439,55 @@ corner(window, 12)
 	if portalId then
 		local portal = Instance.new("ImageLabel")
 		portal.Name = "Portal"
-		portal.BackgroundColor3 = Color3.fromRGB(4, 10, 6)
-		portal.BackgroundTransparency = 0
+		portal.AnchorPoint = Vector2.new(0, 1)
+		portal.Position = UDim2.new(0, 24, 1, -14)
+		portal.Size = UDim2.fromOffset(118, 118)
+		portal.BackgroundTransparency = 1
 		portal.BorderSizePixel = 0
-		portal.Size = UDim2.fromScale(1, 1)
 		portal.Image = portalId
 		portal.ScaleType = Enum.ScaleType.Crop
-		portal.ImageTransparency = 0.12
-		portal.ZIndex = 1
+		portal.ZIndex = 6
 		portal.Active = false
 		portal.Parent = window
-		local dim = Instance.new("Frame")
-		dim.Name = "PortalDim"
-		dim.BackgroundColor3 = Color3.fromRGB(4, 8, 6)
-		dim.BackgroundTransparency = 0.62
-		dim.BorderSizePixel = 0
-		dim.Size = UDim2.fromScale(1, 1)
-		dim.ZIndex = 2
-		dim.Active = false
-		dim.Parent = window
+		corner(portal, 59)
+		local portalStroke = Instance.new("UIStroke")
+		portalStroke.Color = C.accent
+		portalStroke.Thickness = 2
+		portalStroke.Parent = portal
 	end
 	local theme = Instance.new("Sound")
 	theme.Name = "VOIDZ_Theme"
 	theme.SoundId = introId or ""
 	theme.Volume = 0.7
-	theme.Looped = false
+	theme.Looped = true
 	theme.Parent = gui
-	local function playIntro()
-		if theme.SoundId == "" then
+	local function resumeTheme()
+		if theme.SoundId == "" or theme.IsPlaying then
 			return
 		end
-		theme:Stop()
-		theme.TimePosition = 12
-		theme:Play()
-		theme.TimePosition = 12
-		state.themeUntil = os.clock() + 8.2
+		local at = state.themeAt
+		if type(at) ~= "number" or at < 0 or at ~= at then
+			at = theme.TimePosition
+		end
+		if type(at) ~= "number" or at < 0 or at ~= at then
+			at = 0
+		end
+		theme.TimePosition = at
+		theme:Resume()
+		if not theme.IsPlaying then
+			theme:Play()
+		end
+		theme.TimePosition = at
+		state.themeAt = at
 	end
 	state.toggleHub = function()
 		window.Visible = not window.Visible
 		keepChat()
 		if window.Visible then
-			playIntro()
-		else
-			theme:Stop()
+			resumeTheme()
+		elseif theme.IsPlaying then
+			state.themeAt = theme.TimePosition
+			theme:Pause()
 		end
 	end
 	local opener = Instance.new("ImageButton")
@@ -5536,19 +5542,8 @@ corner(window, 12)
 			state.toggleHub()
 		end
 	end)
-	bind(RunService.Heartbeat, function()
-		if not theme.IsPlaying then
-			return
-		end
-		if theme.TimePosition < 12 then
-			theme.TimePosition = 12
-		end
-		if theme.TimePosition >= 20 or os.clock() >= (state.themeUntil or 0) then
-			theme:Stop()
-		end
-	end)
 	if introId then
-		task.defer(playIntro)
+		task.defer(resumeTheme)
 	end
 end)()
 local wash = Instance.new("UIGradient")
