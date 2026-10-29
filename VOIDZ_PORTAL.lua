@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.11
+-- BUILD 2026-10-29-1.6.12
 -- Place 75108253383447 · Universe 10767619742
 -- RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.11"
+local BUILD = "2026-10-29-1.6.12"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -441,12 +441,23 @@ local function teleportTo(cf, label)
 	if not requireGame() then
 		return
 	end
-	local _, _, root = characterParts()
+	local _, humanoid, root = characterParts()
 	if not root or not cf then
 		pushLog("Nothing to teleport to")
 		return
 	end
+	if humanoid and humanoid.SeatPart then
+		humanoid.Sit = false
+	end
+	state.killPart = nil
+	state.aimPoint = nil
+	state.portalCf = cf
+	state.portalUntil = os.clock() + 1
 	root.CFrame = cf
+	pcall(function()
+		root.AssemblyLinearVelocity = Vector3.zero
+		root.AssemblyAngularVelocity = Vector3.zero
+	end)
 	pushLog(label or "Teleported")
 end
 
@@ -2785,6 +2796,19 @@ local function onHeartbeat()
 	if not character or not humanoid or not root then
 		return
 	end
+	if state.portalCf then
+		if os.clock() < (state.portalUntil or 0) then
+			state.killPart = nil
+			state.aimPoint = nil
+			root.CFrame = state.portalCf
+			pcall(function()
+				root.AssemblyLinearVelocity = Vector3.zero
+				root.AssemblyAngularVelocity = Vector3.zero
+			end)
+		else
+			state.portalCf = nil
+		end
+	end
 	if inPortal() and state.houseCharacter ~= character then
 		state.houseCharacter = character
 		task.delay(0.4, function()
@@ -3020,24 +3044,73 @@ local function looksLikeCode(text)
 end
 
 local function clickGui(button)
-	if type(firesignal) == "function" then
-		pcall(firesignal, button.MouseButton1Click)
-		pcall(firesignal, button.Activated)
-	end
-	local size = button.AbsoluteSize
-	if size.X < 2 or size.Y < 2 then
+	if not button or not button.Parent then
 		return
 	end
-	local pos = button.AbsolutePosition
-	local x = pos.X + size.X * 0.5
-	local y = pos.Y + size.Y * 0.5
+	if not button:IsA("GuiButton") then
+		local parent = button.Parent
+		while parent and parent ~= game and not parent:IsA("GuiButton") do
+			parent = parent.Parent
+		end
+		if parent and parent:IsA("GuiButton") then
+			button = parent
+		end
+	end
+	local scroll = button:FindFirstAncestorOfClass("ScrollingFrame")
+	if scroll and button.AbsolutePosition.Y > 0 then
+		local delta = button.AbsolutePosition.Y - scroll.AbsolutePosition.Y
+		scroll.CanvasPosition = Vector2.new(scroll.CanvasPosition.X, math.max(0, scroll.CanvasPosition.Y + delta - 24))
+	end
+	local fired = false
+	local function fireSignal(signal)
+		if not signal then
+			return
+		end
+		if type(getconnections) == "function" then
+			local ok, conns = pcall(getconnections, signal)
+			if ok and type(conns) == "table" then
+				for _, conn in ipairs(conns) do
+					pcall(function()
+						if type(conn.Fire) == "function" then
+							conn:Fire()
+							fired = true
+						elseif type(conn.Function) == "function" then
+							conn.Function()
+							fired = true
+						end
+					end)
+				end
+			end
+		end
+		if type(firesignal) == "function" then
+			local ok = pcall(firesignal, signal)
+			if ok then
+				fired = true
+			end
+		end
+	end
+	fireSignal(button.MouseButton1Down)
+	fireSignal(button.MouseButton1Click)
+	fireSignal(button.Activated)
+	local wasOn = gui and gui.Enabled
+	if gui then
+		gui.Enabled = false
+	end
 	pcall(function()
-		VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 0)
+		local size = button.AbsoluteSize
+		local pos = button.AbsolutePosition
+		if size.X >= 2 and size.Y >= 2 then
+			local x = pos.X + size.X * 0.5
+			local y = pos.Y + size.Y * 0.5
+			VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 0)
+			task.wait(0.05)
+			VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
+		end
 	end)
-	task.wait(0.05)
-	pcall(function()
-		VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
-	end)
+	if gui and wasOn then
+		gui.Enabled = true
+	end
+	return fired
 end
 
 local function cleanLabel(text)
@@ -3059,6 +3132,34 @@ local function skippedWorldLabel(blob)
 	if blob == "" or #blob > 42 or #blob < 2 then
 		return true
 	end
+	local plain = {
+		part = true,
+		parts = true,
+		model = true,
+		mesh = true,
+		meshpart = true,
+		seat = true,
+		vehicleseat = true,
+		handle = true,
+		hitbox = true,
+		folder = true,
+		base = true,
+		primary = true,
+		button = true,
+		imagebutton = true,
+		textbutton = true,
+		frame = true,
+		template = true,
+		humanoidrootpart = true,
+		torso = true,
+		head = true,
+		uppertorso = true,
+		lowertorso = true,
+		union = true,
+	}
+	if plain[blob] then
+		return true
+	end
 	return string.find(blob, "buy", 1, true)
 		or string.find(blob, "robux", 1, true)
 		or string.find(blob, "shop", 1, true)
@@ -3072,10 +3173,18 @@ local function skippedWorldLabel(blob)
 end
 
 local function buttonLabel(inst)
-	if inst:IsA("TextButton") then
+	if inst:IsA("TextButton") or inst:IsA("TextLabel") then
 		local text = cleanLabel(inst.Text)
 		if text ~= "" then
 			return text
+		end
+	end
+	for _, child in ipairs(inst:GetDescendants()) do
+		if child:IsA("TextLabel") or child:IsA("TextButton") then
+			local text = cleanLabel(child.Text)
+			if text ~= "" and #text <= 42 then
+				return text
+			end
 		end
 	end
 	return cleanLabel(inst.Name)
@@ -3096,12 +3205,16 @@ local function screenTitleIsWorld(screen)
 	local seen = 0
 	for _, inst in ipairs(screen:GetDescendants()) do
 		seen = seen + 1
-		if seen > 400 then
+		if seen > 1200 then
 			break
 		end
 		if inst:IsA("TextLabel") or inst:IsA("TextButton") then
 			local blob = string.lower(inst.Text or "")
-			if string.find(blob, "dimension", 1, true) or string.find(blob, "worlds", 1, true) or string.find(blob, "select a world", 1, true) then
+			if string.find(blob, "dimension", 1, true)
+				or string.find(blob, "worlds", 1, true)
+				or string.find(blob, "destination", 1, true)
+				or string.find(blob, "select a world", 1, true)
+			then
 				return true
 			end
 		end
@@ -3121,22 +3234,68 @@ end
 local function scanWorlds()
 	local into = {}
 	local seen = {}
+	local roots = {}
 	if PlayerGui then
-		for _, screen in ipairs(PlayerGui:GetChildren()) do
+		table.insert(roots, PlayerGui)
+	end
+	if type(gethui) == "function" then
+		local ok, hidden = pcall(gethui)
+		if ok and typeof(hidden) == "Instance" then
+			table.insert(roots, hidden)
+		end
+	end
+	local bestParent = nil
+	local bestCount = 0
+	local counts = {}
+	local function noteButton(inst)
+		if not (inst:IsA("TextButton") or inst:IsA("ImageButton")) then
+			return
+		end
+		if gui and inst:IsDescendantOf(gui) then
+			return
+		end
+		local parent = inst.Parent
+		if parent and (parent:IsA("Frame") or parent:IsA("ScrollingFrame")) then
+			local count = (counts[parent] or 0) + 1
+			counts[parent] = count
+			if count > bestCount then
+				bestCount = count
+				bestParent = parent
+			end
+		end
+	end
+	for _, root in ipairs(roots) do
+		for _, screen in ipairs(root:GetChildren()) do
 			if screen:IsA("ScreenGui") and screen ~= gui and screen.Enabled then
 				local titled = isWorldHostName(string.lower(screen.Name)) or screenTitleIsWorld(screen)
 				local count = 0
 				for _, inst in ipairs(screen:GetDescendants()) do
 					count = count + 1
-					if count > 800 or #into >= 100 then
+					if count > 2500 or #into >= 100 then
 						break
 					end
-					if (inst:IsA("TextButton") or inst:IsA("ImageButton")) and inst.Visible then
+					if inst:IsA("TextButton") or inst:IsA("ImageButton") then
+						noteButton(inst)
 						if titled or ancestorIsWorld(inst) then
 							pushWorld(into, seen, buttonLabel(inst), "gui", inst)
 						end
 					end
 				end
+			elseif (screen:IsA("SurfaceGui") or screen:IsA("BillboardGui")) and screen.Enabled then
+				if isWorldHostName(string.lower(screen.Name)) or ancestorIsWorld(screen) then
+					for _, inst in ipairs(screen:GetDescendants()) do
+						if inst:IsA("TextButton") or inst:IsA("ImageButton") then
+							pushWorld(into, seen, buttonLabel(inst), "gui", inst)
+						end
+					end
+				end
+			end
+		end
+	end
+	if state.worldLoose and bestParent and bestCount >= 5 then
+		for _, inst in ipairs(bestParent:GetChildren()) do
+			if inst:IsA("TextButton") or inst:IsA("ImageButton") then
+				pushWorld(into, seen, buttonLabel(inst), "gui", inst)
 			end
 		end
 	end
@@ -3145,6 +3304,25 @@ local function scanWorlds()
 			return
 		end
 		if inst:IsA("Model") and inst:FindFirstChildOfClass("Humanoid") then
+			return
+		end
+		if inst:IsA("ProximityPrompt") then
+			local label = cleanLabel(inst.ObjectText)
+			if label == "" then
+				label = cleanLabel(inst.ActionText)
+			end
+			if label == "" then
+				label = cleanLabel(inst.Name)
+			end
+			pushWorld(into, seen, label, "prompt", inst)
+			return
+		end
+		if inst:IsA("SurfaceGui") or inst:IsA("BillboardGui") then
+			for _, button in ipairs(inst:GetDescendants()) do
+				if button:IsA("TextButton") or button:IsA("ImageButton") then
+					pushWorld(into, seen, buttonLabel(button), "gui", button)
+				end
+			end
 			return
 		end
 		if inst:IsA("Model") or inst:IsA("BasePart") then
@@ -3157,7 +3335,9 @@ local function scanWorlds()
 		end
 		for _, child in ipairs(folder:GetChildren()) do
 			local blob = string.lower(child.Name)
-			if isWorldHostName(blob) and (child:IsA("Folder") or child:IsA("Model")) then
+			if child:IsA("ProximityPrompt") and (isWorldHostName(blob) or ancestorIsWorld(child) or isWorldHostName(string.lower(child.ActionText .. " " .. child.ObjectText))) then
+				considerPlace(child)
+			elseif isWorldHostName(blob) and (child:IsA("Folder") or child:IsA("Model") or child:IsA("SurfaceGui") or child:IsA("BillboardGui")) then
 				for _, item in ipairs(child:GetChildren()) do
 					if item:IsA("Folder") then
 						for _, nested in ipairs(item:GetChildren()) do
@@ -3185,6 +3365,23 @@ local function pressWorld(entry)
 	if not requireGame() or not entry then
 		return
 	end
+	if entry.kind == "prompt" and entry.inst and entry.inst.Parent then
+		local prompt = entry.inst
+		if type(fireproximityprompt) == "function" then
+			pcall(fireproximityprompt, prompt)
+		else
+			pcall(function()
+				prompt:InputHoldBegin()
+				task.delay((prompt.HoldDuration or 0) + 0.05, function()
+					if prompt.Parent then
+						prompt:InputHoldEnd()
+					end
+				end)
+			end)
+		end
+		pushLog(entry.label)
+		return
+	end
 	if entry.kind == "part" then
 		local cf = pivotOf(entry.inst)
 		if cf then
@@ -3206,11 +3403,13 @@ local function pressWorld(entry)
 		return
 	end
 	sendKey(Enum.KeyCode.R, "Dimensions")
-	task.delay(0.45, function()
+	task.delay(0.85, function()
 		if not state.alive then
 			return
 		end
+		state.worldLoose = true
 		scanWorlds()
+		state.worldLoose = false
 		for _, item in ipairs(state.worlds) do
 			if item.kind == "gui" and string.lower(item.label) == string.lower(entry.label) and activate(item.inst) then
 				return
@@ -3977,22 +4176,24 @@ function renderPage()
 	end
 
 	if state.page == "Portals" then
-		if os.clock() - (state.worldScanAt or 0) > 2 then
+		if #state.worlds == 0 and os.clock() - (state.worldScanAt or 0) > 2 then
 			scanWorlds()
 		end
 		heading(centerHolder, "Worlds", nextOrder())
-		note(centerHolder, "Refresh reads the dimension menu and world parts in the map. Press one world to teleport there. It does not cycle them.", nextOrder())
+		note(centerHolder, "Refresh opens the dimension menu and reads its list. Press one world. The hub hides for a moment so the game gets the click. It does not cycle worlds.", nextOrder())
 		note(centerHolder, tostring(#state.worlds) .. " worlds found.", nextOrder())
 		actionButton(centerHolder, "Refresh worlds", nextOrder(), function()
 			if not requireGame() then
 				return
 			end
 			sendKey(Enum.KeyCode.R, "Dimensions")
-			task.delay(0.5, function()
+			task.delay(0.85, function()
 				if not state.alive then
 					return
 				end
+				state.worldLoose = true
 				local count = scanWorlds()
+				state.worldLoose = false
 				pushLog("Worlds " .. tostring(count))
 				if state.page == "Portals" then
 					renderPage()
@@ -4496,7 +4697,7 @@ pcall(function()
 	RunService:UnbindFromRenderStep("VOIDZ_PORTAL_MAT")
 end)
 RunService:BindToRenderStep("VOIDZ_PORTAL_MAT", Enum.RenderPriority.Last.Value, function()
-	if not state.alive or state.fleeing or state.killPart or not materialHoldActive() then
+	if not state.alive or state.fleeing or state.killPart or state.portalCf or not materialHoldActive() then
 		return
 	end
 	local _, _, matRoot = characterParts()
@@ -4513,6 +4714,19 @@ RunService:BindToRenderStep("VOIDZ_PORTAL_STICK", Enum.RenderPriority.Camera.Val
 		if homeRoot and shouldGoHome(homeHumanoid) then
 			goHome(homeRoot)
 		end
+		return
+	end
+	if state.portalCf and os.clock() < (state.portalUntil or 0) then
+		local _, _, holdRoot = characterParts()
+		if holdRoot then
+			holdRoot.CFrame = state.portalCf
+			pcall(function()
+				holdRoot.AssemblyLinearVelocity = Vector3.zero
+				holdRoot.AssemblyAngularVelocity = Vector3.zero
+			end)
+		end
+		state.killPart = nil
+		state.aimPoint = nil
 		return
 	end
 	if state.autoKill then

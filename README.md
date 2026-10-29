@@ -4,7 +4,7 @@
 loadstring(game:HttpGet("https://raw.githubusercontent.com/fungamer1234/voidz-portal/main/VOIDZ_PORTAL.lua", true))()
 ```
 
-Build `2026-10-29-1.6.11`
+Build `2026-10-29-1.6.12`
 
 Game: [Portal Sandbox](https://www.roblox.com/games/75108253383447/Portal-Sandbox). PlaceId `75108253383447`.
 
@@ -23,7 +23,7 @@ Home lists every tab and the activity log. Click a row to open that tab. The ope
 - **Move.** Fly, noclip, walk speed, infinite jump, click teleport, and anti void.
 - **PvP.** Auto kill loops you a short distance behind the target and fires the weapon you have out. A selected player is the only target, and the script waits when they are gone. Mech escape spams space while a mech is holding you. Home when hurt teleports you to your house spawn under the health percent you set.
 - **Materials.** Auto collect stands on ground scrap, fires the pickup, and stays until the game takes it, then moves to the next closest. It skips chairs. Choose a material to grab only that type.
-- **Portals.** Lists worlds from the dimension menu and from world parts in the map. Press one to teleport there. It does not cycle through worlds.
+- **Portals.** Refresh opens the dimension menu and lists the worlds it is showing, plus world pads in the map. Press one. The hub steps aside so the game receives that click, and a pad teleport is held in place. It does not cycle through worlds.
 - **Visuals.** Client-side player highlights, fullbright, and field of view.
 - **Players.** The list on the right selects a player. The selected card is purple and labeled SELECTED. Your own card says YOU and cannot be selected. Click a selected card again, or press Unselect, to clear it. Teleport, spectate, and auto kill use that player while their character is in the world, even if the health number reads 0.
 - **Settings.** Unload script turns off every feature the hub enabled, restores your character, camera, lighting, and field of view, and removes the window.
