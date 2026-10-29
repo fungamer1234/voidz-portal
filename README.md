@@ -4,7 +4,7 @@
 loadstring(game:HttpGet("https://raw.githubusercontent.com/fungamer1234/voidz-portal/main/VOIDZ_PORTAL.lua", true))()
 ```
 
-Build `2026-10-29-1.6.22`
+Build `2026-10-29-1.6.23`
 
 Game: [Portal Sandbox](https://www.roblox.com/games/75108253383447/Portal-Sandbox). PlaceId `75108253383447`.
 
@@ -20,7 +20,7 @@ A copy of the same file is at `Documents/MacsploitUI/scripts/VOIDZ_PORTAL.lua` i
 
 Home lists every tab and the activity log. Click a row to open that tab. The open tab is marked in purple.
 
-- **Move.** Fly, noclip, walk speed, infinite jump, click teleport, and anti void.
+- **Move.** Fly, noclip, walk speed, infinite jump, click teleport, and anti void. Walk speed moves you at the number you set, because the game was ignoring the normal walk value. It stays off while fly, auto kill, a teleport, or a mech grab is active.
 - **Teleport.** Home base is the house you spawned at. You can also save a mark, jump forward, jump up, jump to a random nearby spot, or teleport to the selected player or a random player. These stay in the current world.
 - **PvP.** Auto kill loops you behind the player and turns you to face them until you turn it off. Your crosshair stays on that player so you can shoot. The mouse pointer still reaches the hub, and you can zoom, including first person. Auto fire is a separate toggle that shoots the weapon in your hand. A selected player is the only target, and the script waits when they are gone. Mech escape sends a short burst of separate space taps, using the click count on screen when the game shows one, then stops so you are not launched upward. A slam starts that burst again. Home when hurt teleports you to your house spawn under the health percent you set.
 - **Materials.** Auto collect stands on ground scrap, fires the pickup, and stays until the game takes it, then moves to the next closest. It skips chairs. Choose a material to grab only that type.

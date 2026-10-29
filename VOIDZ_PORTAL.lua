@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.22
+-- BUILD 2026-10-29-1.6.23
 -- Place 75108253383447 · Universe 10767619742
 -- RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.22"
+local BUILD = "2026-10-29-1.6.23"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -591,6 +591,7 @@ local function sweepHubObjects()
 		VOIDZ_TAG = true,
 		VOIDZ_FlyBG = true,
 		VOIDZ_FlyBV = true,
+		VOIDZ_WalkBV = true,
 		VOIDZ_KillHold = true,
 	}
 	for _, player in ipairs(Players:GetPlayers()) do
@@ -609,6 +610,12 @@ local function restoreCharacter()
 	local _, humanoid, root = characterParts()
 	clearFly(root)
 	restoreCollide()
+	if root then
+		local walkPush = root:FindFirstChild("VOIDZ_WalkBV")
+		if walkPush then
+			walkPush:Destroy()
+		end
+	end
 	if humanoid then
 		humanoid.PlatformStand = false
 		if savedWalk ~= nil then
@@ -3374,7 +3381,12 @@ local function onHeartbeat()
 	end
 	if state.speed and inPortal() then
 		if savedWalk == nil then
-			savedWalk = humanoid.WalkSpeed
+			local currentWalk = humanoid.WalkSpeed
+			if currentWalk >= 10 and currentWalk <= 32 then
+				savedWalk = currentWalk
+			else
+				savedWalk = 16
+			end
 		end
 		humanoid.WalkSpeed = state.walkSpeed
 		state.speedApplied = true
@@ -3382,6 +3394,10 @@ local function onHeartbeat()
 		if savedWalk ~= nil then
 			humanoid.WalkSpeed = savedWalk
 			savedWalk = nil
+		end
+		local walkPush = root:FindFirstChild("VOIDZ_WalkBV")
+		if walkPush then
+			walkPush:Destroy()
 		end
 		state.speedApplied = false
 	end
@@ -4582,7 +4598,7 @@ function renderPage()
 
 	if state.page == "Move" then
 		heading(centerHolder, "Movement", nextOrder())
-		note(centerHolder, "Fly uses WASD. Space rises. LeftControl or LeftShift drops. These only run inside Portal Sandbox.", nextOrder())
+		note(centerHolder, "Fly uses WASD. Space rises. LeftControl or LeftShift drops. Walk speed moves you at the number shown. These only run inside Portal Sandbox.", nextOrder())
 		toggleRow(centerHolder, "Fly", nextOrder(), state.fly, function()
 			if not state.fly and not requireGame() then
 				return
@@ -5362,6 +5378,93 @@ bind(UserInputService.JumpRequest, function()
 	end
 end)
 bind(RunService.Heartbeat, onHeartbeat)
+bind(RunService.Stepped, function()
+	if not state.alive or not state.speed or not inPortal() then
+		return
+	end
+	local _, humanoid, root = characterParts()
+	if not humanoid or not root then
+		return
+	end
+	humanoid.WalkSpeed = state.walkSpeed
+	local busy = state.fly
+		or state.autoKill
+		or state.killPart
+		or state.fleeing
+		or state.iqBusy
+		or state.mechHeld
+		or state.portalCf
+		or materialHoldActive()
+		or humanoid.SeatPart
+		or (state.followId and os.clock() < (state.portalUntil or 0))
+	local function clearWalkPush()
+		local existing = root:FindFirstChild("VOIDZ_WalkBV")
+		if existing then
+			existing:Destroy()
+		end
+	end
+	if busy or UserInputService:GetFocusedTextBox() then
+		clearWalkPush()
+		return
+	end
+	local function walkDirection()
+		local move = humanoid.MoveDirection
+		if typeof(move) == "Vector3" and move.Magnitude > 0.05 then
+			local flatMove = Vector3.new(move.X, 0, move.Z)
+			if flatMove.Magnitude > 0.05 then
+				return flatMove.Unit
+			end
+		end
+		local camera = workspace.CurrentCamera
+		if not camera then
+			return nil
+		end
+		local look = camera.CFrame.LookVector
+		local right = camera.CFrame.RightVector
+		local flatLook = Vector3.new(look.X, 0, look.Z)
+		local flatRight = Vector3.new(right.X, 0, right.Z)
+		if flatLook.Magnitude < 0.05 then
+			flatLook = Vector3.new(0, 0, -1)
+		else
+			flatLook = flatLook.Unit
+		end
+		if flatRight.Magnitude < 0.05 then
+			flatRight = Vector3.new(1, 0, 0)
+		else
+			flatRight = flatRight.Unit
+		end
+		local wish = Vector3.zero
+		if held[Enum.KeyCode.W] then
+			wish = wish + flatLook
+		end
+		if held[Enum.KeyCode.S] then
+			wish = wish - flatLook
+		end
+		if held[Enum.KeyCode.D] then
+			wish = wish + flatRight
+		end
+		if held[Enum.KeyCode.A] then
+			wish = wish - flatRight
+		end
+		if wish.Magnitude < 0.05 then
+			return nil
+		end
+		return wish.Unit
+	end
+	local direction = walkDirection()
+	if not direction then
+		clearWalkPush()
+		return
+	end
+	local push = root:FindFirstChild("VOIDZ_WalkBV")
+	if not push then
+		push = Instance.new("BodyVelocity")
+		push.Name = "VOIDZ_WalkBV"
+		push.MaxForce = Vector3.new(400000, 0, 400000)
+		push.Parent = root
+	end
+	push.Velocity = direction * state.walkSpeed
+end)
 pcall(function()
 	RunService:UnbindFromRenderStep("VOIDZ_PORTAL_STICK")
 	RunService:UnbindFromRenderStep("VOIDZ_PORTAL_MAT")
