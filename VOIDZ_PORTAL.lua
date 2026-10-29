@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.36
+-- BUILD 2026-10-29-1.6.37
 -- Place 75108253383447 · Universe 10767619742
 -- The picture button or RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.36"
+local BUILD = "2026-10-29-1.6.37"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -82,6 +82,7 @@ local state = {
 	autoEscape = false,
 	autoHome = false,
 	homeAt = 30,
+	blink = false,
 	autoFarm = false,
 	autoQuest = false,
 	autoIq = false,
@@ -1227,6 +1228,9 @@ local function revertFeatures()
 	state.mechWatch = nil
 	state.autoHome = false
 	state.fleeing = false
+	state.blink = false
+	state.blinkCf = nil
+	state.blinkUntil = 0
 	state.autoFarm = false
 	state.autoQuest = false
 	state.autoIq = false
@@ -3664,7 +3668,7 @@ local function shouldGoHome(humanoid)
 	if not state.autoHome or not state.house or not inPortal() then
 		return false
 	end
-	if not humanoid or humanoid.Health <= 0 or humanoid.MaxHealth <= 0 then
+	if not humanoid or humanoid.MaxHealth <= 0 then
 		return false
 	end
 	return (humanoid.Health / humanoid.MaxHealth) <= (state.homeAt or 30) / 100
@@ -3674,16 +3678,12 @@ local function goHome(root)
 	if not state.house or not root then
 		return
 	end
-	local now = os.clock()
-	if now < (state.nextHome or 0) then
-		return
-	end
-	state.nextHome = now + 0.6
 	root.CFrame = state.house
 	pcall(function()
 		root.AssemblyLinearVelocity = Vector3.zero
 		root.AssemblyAngularVelocity = Vector3.zero
 	end)
+	local now = os.clock()
 	if now >= (state.homeNoted or 0) then
 		state.homeNoted = now + 4
 		pushLog("Low health, back home")
@@ -3723,6 +3723,9 @@ local function onHeartbeat()
 	end
 	if inPortal() and state.houseCharacter ~= character then
 		state.houseCharacter = character
+		if state.house == nil then
+			state.house = root.CFrame
+		end
 		task.delay(0.4, function()
 			if not state.alive then
 				return
@@ -3771,7 +3774,7 @@ local function onHeartbeat()
 	if materialHoldActive() then
 		state.locking = true
 	end
-	if state.fly and inPortal() and not state.iqBusy and not state.killPart and not state.autoKill and not state.fleeing and not materialHoldActive() then
+	if state.fly and inPortal() and not state.iqBusy and not state.killPart and not state.autoKill and not state.fleeing and os.clock() >= (state.blinkUntil or 0) and not materialHoldActive() then
 		local gyro, velocity = ensureFly(root)
 		local camera = workspace.CurrentCamera
 		if gyro and camera then
@@ -3802,6 +3805,7 @@ local function onHeartbeat()
 		and not state.iqBusy
 		and not materialHoldActive()
 		and not state.portalCf
+		and os.clock() >= (state.blinkUntil or 0)
 		and not humanoid.SeatPart
 	if canShove then
 		local limit = state.shoveStuds or 15
@@ -3979,6 +3983,92 @@ local function onHeartbeat()
 			end
 		end
 	end
+	if not state.stepAway then
+		state.stepAway = function(fromRoot)
+			if not fromRoot or not state.blink or not inPortal() or state.fleeing or state.autoKill or state.killPart or state.iqBusy or materialHoldActive() then
+				return
+			end
+			local now = os.clock()
+			if now < (state.blinkUntil or 0) then
+				if state.blinkCf then
+					fromRoot.CFrame = state.blinkCf
+					pcall(function()
+						fromRoot.AssemblyLinearVelocity = Vector3.zero
+						fromRoot.AssemblyAngularVelocity = Vector3.zero
+					end)
+				end
+				return
+			end
+			local away = nil
+			local closest = 80
+			for _, player in ipairs(Players:GetPlayers()) do
+				if player ~= LocalPlayer and not sameTeam(player) then
+					local part = playerRoot(player)
+					if part then
+						local flat = Vector3.new(fromRoot.Position.X - part.Position.X, 0, fromRoot.Position.Z - part.Position.Z)
+						local dist = flat.Magnitude
+						if dist > 0.4 and dist < closest then
+							closest = dist
+							away = flat.Unit
+						end
+					end
+				end
+			end
+			if not away then
+				local look = fromRoot.CFrame.LookVector
+				local flatLook = Vector3.new(look.X, 0, look.Z)
+				if flatLook.Magnitude < 0.05 then
+					away = Vector3.new(0, 0, 1)
+				else
+					away = -flatLook.Unit
+				end
+			end
+			local pos = fromRoot.Position + away * 20 + Vector3.new(0, 3, 0)
+			fromRoot.CFrame = CFrame.lookAt(pos, pos + away)
+			pcall(function()
+				fromRoot.AssemblyLinearVelocity = Vector3.zero
+				fromRoot.AssemblyAngularVelocity = Vector3.zero
+			end)
+			for _, name in ipairs({ "VOIDZ_KillHold", "VOIDZ_Shove", "VOIDZ_WalkBV" }) do
+				local mover = fromRoot:FindFirstChild(name)
+				if mover then
+					mover:Destroy()
+				end
+			end
+			state.blinkCf = fromRoot.CFrame
+			state.blinkUntil = now + 0.45
+			if now >= (state.blinkNoted or 0) then
+				state.blinkNoted = now + 2
+				pushLog("Blinked about 20 feet")
+			end
+		end
+	end
+	if state.healthHumanoid ~= humanoid then
+		state.healthHumanoid = humanoid
+		state.lastHp = humanoid.Health
+		bind(humanoid.HealthChanged, function()
+			if not state.alive then
+				return
+			end
+			local _, hpHumanoid, hpRoot = characterParts()
+			if not hpHumanoid or not hpRoot then
+				return
+			end
+			local previous = state.lastHp
+			local nowHp = hpHumanoid.Health
+			if shouldGoHome(hpHumanoid) then
+				goHome(hpRoot)
+				state.fleeing = true
+				local killHold = hpRoot:FindFirstChild("VOIDZ_KillHold")
+				if killHold then
+					killHold:Destroy()
+				end
+			elseif state.stepAway and type(previous) == "number" and nowHp < previous - 0.05 then
+				state.stepAway(hpRoot)
+			end
+			state.lastHp = nowHp
+		end)
+	end
 	if shouldGoHome(humanoid) then
 		goHome(root)
 		state.fleeing = true
@@ -3989,6 +4079,18 @@ local function onHeartbeat()
 	else
 		state.fleeing = false
 	end
+	if state.blinkCf and os.clock() < (state.blinkUntil or 0) and not state.fleeing then
+		root.CFrame = state.blinkCf
+		pcall(function()
+			root.AssemblyLinearVelocity = Vector3.zero
+			root.AssemblyAngularVelocity = Vector3.zero
+		end)
+	end
+	local previousHp = state.lastHp
+	if not state.fleeing and state.stepAway and type(previousHp) == "number" and humanoid.Health < previousHp - 0.05 then
+		state.stepAway(root)
+	end
+	state.lastHp = humanoid.Health
 	if materialHoldActive() then
 		state.locking = true
 	end
@@ -5252,7 +5354,7 @@ function renderPage()
 			renderPage()
 		end)
 		heading(centerHolder, "Survival", nextOrder())
-		note(centerHolder, "Mech escape keeps tapping space while a grab or slam is holding you, and stops once you are free. It does not hold jump. Home returns you to your house spawn under the percent you set.", nextOrder())
+		note(centerHolder, "Mech escape keeps tapping space while a grab or slam is holding you, and stops once you are free. It does not hold jump. Home snaps you to your house the moment health drops under the percent. Blink when hit teleports you about 20 feet away from the nearest player.", nextOrder())
 		toggleRow(centerHolder, "Mech escape", nextOrder(), state.autoEscape, function()
 			if not state.autoEscape and not requireGame() then
 				return
@@ -5274,6 +5376,19 @@ function renderPage()
 			renderPage()
 		end, function()
 			state.homeAt = math.min(80, (state.homeAt or 30) + 5)
+			renderPage()
+		end)
+		toggleRow(centerHolder, "Blink when hit", nextOrder(), state.blink == true, function()
+			if not state.blink and not requireGame() then
+				return
+			end
+			state.blink = not state.blink
+			if not state.blink then
+				state.blinkCf = nil
+				state.blinkUntil = 0
+			end
+			state.justToggled = "Blink when hit"
+			pushLog(state.blink and "Blink when hit on" or "Blink when hit off")
 			renderPage()
 		end)
 		heading(centerHolder, "Space", nextOrder())
@@ -6622,6 +6737,7 @@ bind(RunService.Stepped, function()
 		or state.autoKill
 		or state.killPart
 		or state.fleeing
+		or os.clock() < (state.blinkUntil or 0)
 		or state.iqBusy
 		or state.mechHeld
 		or state.portalCf
@@ -6718,6 +6834,17 @@ RunService:BindToRenderStep("VOIDZ_PORTAL_STICK", Enum.RenderPriority.Last.Value
 		local _, homeHumanoid, homeRoot = characterParts()
 		if homeRoot and shouldGoHome(homeHumanoid) then
 			goHome(homeRoot)
+		end
+		return
+	end
+	if state.blinkCf and os.clock() < (state.blinkUntil or 0) and not state.autoKill then
+		local _, _, blinkRoot = characterParts()
+		if blinkRoot then
+			blinkRoot.CFrame = state.blinkCf
+			pcall(function()
+				blinkRoot.AssemblyLinearVelocity = Vector3.zero
+				blinkRoot.AssemblyAngularVelocity = Vector3.zero
+			end)
 		end
 		return
 	end
