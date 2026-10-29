@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.38
+-- BUILD 2026-10-29-1.6.39
 -- Place 75108253383447 · Universe 10767619742
 -- The picture button or RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.38"
+local BUILD = "2026-10-29-1.6.39"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -83,6 +83,8 @@ local state = {
 	autoHome = false,
 	homeAt = 30,
 	blink = false,
+	bring = false,
+	bringStuds = 80,
 	autoFarm = false,
 	autoQuest = false,
 	autoIq = false,
@@ -1231,6 +1233,10 @@ local function revertFeatures()
 	state.blink = false
 	state.blinkCf = nil
 	state.blinkUntil = 0
+	state.bring = false
+	state.bringLink = nil
+	state.bringHeld = nil
+	state.bringToss = 0
 	if state.phaseConn then
 		state.phaseConn:Disconnect()
 		state.phaseConn = nil
@@ -4139,6 +4145,238 @@ local function onHeartbeat()
 		state.stepAway(root)
 	end
 	state.lastHp = humanoid.Health
+	if not state.stepBring then
+		state.stepBring = function(fromRoot, fromChar)
+			if not state.bring or not inPortal() or state.fleeing or state.autoKill or state.killPart or state.iqBusy or state.mechHeld or materialHoldActive() then
+				return
+			end
+			if os.clock() < (state.blinkUntil or 0) or state.portalCf or UserInputService:GetFocusedTextBox() then
+				return
+			end
+			local now = os.clock()
+			local player = selectedPlayer()
+			if not player or sameTeam(player) then
+				if now >= (state.bringNoted or 0) then
+					state.bringNoted = now + 3
+					pushLog(player and "Bring skips teammates" or "Pick a player for Bring")
+				end
+				return
+			end
+			local theirPart = playerRoot(player)
+			local theirChar = player.Character
+			if not theirPart or not theirChar then
+				if now >= (state.bringNoted or 0) then
+					state.bringNoted = now + 3
+					pushLog(player.DisplayName .. " is not loaded")
+				end
+				return
+			end
+			if state.bringTossId == player.UserId and now < (state.bringToss or 0) then
+				return
+			end
+			local function owns(part)
+				local ok, owner = pcall(function()
+					return part:GetNetworkOwner()
+				end)
+				return ok and owner == LocalPlayer
+			end
+			local function awayCFrame()
+				local flat = Vector3.new(theirPart.Position.X - fromRoot.Position.X, 0, theirPart.Position.Z - fromRoot.Position.Z)
+				local dir
+				if flat.Magnitude < 0.4 then
+					local look = fromRoot.CFrame.LookVector
+					local flatLook = Vector3.new(look.X, 0, look.Z)
+					dir = flatLook.Magnitude < 0.05 and Vector3.new(0, 0, 1) or flatLook.Unit
+				else
+					dir = flat.Unit
+				end
+				local dist = math.clamp(state.bringStuds or 80, 20, 200)
+				local pos = fromRoot.Position + dir * dist + Vector3.new(0, 3, 0)
+				return CFrame.lookAt(pos, fromRoot.Position)
+			end
+			local function markToss(text)
+				state.bringToss = now + 1.2
+				state.bringTossId = player.UserId
+				state.bringWasHeld = true
+				state.bringHeld = player.UserId
+				if now >= (state.bringNoted or 0) then
+					state.bringNoted = now + 2
+					pushLog(text)
+				end
+			end
+			if owns(theirPart) then
+				local goal = awayCFrame()
+				theirPart.CFrame = goal
+				pcall(function()
+					theirPart.AssemblyLinearVelocity = Vector3.zero
+					theirPart.AssemblyAngularVelocity = Vector3.zero
+				end)
+				markToss("Brought " .. player.DisplayName .. " away")
+				return
+			end
+			local function armName(name)
+				return string.find(name, "robo", 1, true)
+					or string.find(name, "robot", 1, true)
+					or string.find(name, "claw", 1, true)
+					or string.find(name, "grab", 1, true)
+			end
+			local function findLink()
+				if state.bringUser == player.UserId and now < (state.bringScan or 0) then
+					local cached = state.bringLink
+					if cached and cached.Parent then
+						return cached
+					end
+					if cached == false then
+						return nil
+					end
+				end
+				state.bringScan = now + 0.2
+				state.bringUser = player.UserId
+				local link = nil
+				local function consider(inst)
+					if link then
+						return
+					end
+					local className = inst.ClassName
+					local a
+					local b
+					if className == "Weld" or className == "WeldConstraint" or className == "Motor6D" then
+						a = inst.Part0
+						b = inst.Part1
+					elseif className == "RopeConstraint" or className == "RodConstraint" or className == "SpringConstraint" or className == "AlignPosition" or className == "AlignOrientation" or className == "BallSocketConstraint" or className == "HingeConstraint" then
+						local att0 = inst.Attachment0
+						local att1 = inst.Attachment1
+						a = att0 and att0.Parent
+						b = att1 and att1.Parent
+					else
+						return
+					end
+					if typeof(a) ~= "Instance" or typeof(b) ~= "Instance" then
+						return
+					end
+					local aOurs = a:IsDescendantOf(fromChar)
+					local bOurs = b:IsDescendantOf(fromChar)
+					local aTheirs = a:IsDescendantOf(theirChar)
+					local bTheirs = b:IsDescendantOf(theirChar)
+					if (aOurs and bTheirs) or (bOurs and aTheirs) then
+						link = inst
+					end
+				end
+				for _, inst in ipairs(fromChar:GetDescendants()) do
+					consider(inst)
+				end
+				if not link then
+					for _, inst in ipairs(theirChar:GetDescendants()) do
+						consider(inst)
+					end
+				end
+				state.bringLink = link or false
+				return link
+			end
+			local link = findLink()
+			if link then
+				local className = link.ClassName
+				if className == "AlignPosition" or className == "AlignOrientation" then
+					local att0 = link.Attachment0
+					local att1 = link.Attachment1
+					local ours = nil
+					if att0 and att0.Parent and att0.Parent:IsDescendantOf(fromChar) then
+						ours = att0
+					elseif att1 and att1.Parent and att1.Parent:IsDescendantOf(fromChar) then
+						ours = att1
+					end
+					if ours then
+						pcall(function()
+							ours.WorldCFrame = awayCFrame()
+						end)
+						markToss("Pulling " .. player.DisplayName .. " away")
+						return
+					end
+				end
+				state.bringWasHeld = true
+				state.bringHeld = player.UserId
+				if now >= (state.bringNoted or 0) then
+					state.bringNoted = now + 2
+					pushLog("Arms have " .. player.DisplayName .. ", but the game still owns them")
+				end
+				return
+			end
+			local flat = Vector3.new(theirPart.Position.X - fromRoot.Position.X, 0, theirPart.Position.Z - fromRoot.Position.Z)
+			if flat.Magnitude > 28 then
+				if now >= (state.bringNoted or 0) then
+					state.bringNoted = now + 3
+					pushLog("Get closer to grab " .. player.DisplayName)
+				end
+				return
+			end
+			if now < (state.bringKey or 0) then
+				return
+			end
+			state.bringKey = now + 1.2
+			if flat.Magnitude > 0.4 then
+				fromRoot.CFrame = CFrame.lookAt(fromRoot.Position, Vector3.new(theirPart.Position.X, fromRoot.Position.Y, theirPart.Position.Z))
+			end
+			local equipped = nil
+			local backpackTool = nil
+			for _, tool in ipairs(listTools()) do
+				if armName(string.lower(tool.Name)) then
+					if tool.Parent == fromChar then
+						equipped = tool
+						break
+					elseif not backpackTool then
+						backpackTool = tool
+					end
+				end
+			end
+			local action = nil
+			if equipped then
+				pcall(function()
+					equipped:Activate()
+				end)
+				action = "Grabbing " .. player.DisplayName
+			elseif backpackTool then
+				local _, humanoid = characterParts()
+				if humanoid then
+					pcall(function()
+						humanoid:EquipTool(backpackTool)
+					end)
+				end
+				action = "Equipped " .. backpackTool.Name
+			else
+				pcall(function()
+					VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.V, false, game)
+					task.delay(0.06, function()
+						pcall(function()
+							VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.V, false, game)
+						end)
+					end)
+				end)
+				action = "Sent V for robo arms"
+			end
+			local function tryPrompts(model)
+				for _, inst in ipairs(model:GetDescendants()) do
+					if inst.ClassName == "ProximityPrompt" and inst.Enabled then
+						local blob = string.lower(inst.Name .. " " .. inst.ActionText .. " " .. inst.ObjectText)
+						if not string.find(blob, "scrap", 1, true) and not string.find(blob, "material", 1, true) and armName(blob) then
+							firePrompt(inst)
+							return true
+						end
+					end
+				end
+				return false
+			end
+			if tryPrompts(theirChar) or tryPrompts(fromChar) then
+				action = "Grab prompt on " .. player.DisplayName
+			end
+			if action and now >= (state.bringNoted or 0) then
+				state.bringNoted = now + 2
+				pushLog(action)
+			end
+		end
+	end
+	if state.bring then
+		state.stepBring(root, character)
+	end
 	if materialHoldActive() then
 		state.locking = true
 	end
@@ -5153,6 +5391,7 @@ function renderPage()
 		Materials = "Ground scrap",
 		Visuals = "Client look",
 		Players = "Teleport, spectate, kill",
+		Misc = "Robo arms",
 		Settings = "Keys, theme, unload",
 	}
 	pageTitle.Text = hints[state.page] or state.page
@@ -5173,6 +5412,7 @@ function renderPage()
 		guideRow(centerHolder, "Materials", "Stand on scrap, or take 10 from each area.", nextOrder())
 		guideRow(centerHolder, "Visuals", "ESP, fullbright, and field of view.", nextOrder())
 		guideRow(centerHolder, "Players", "Select someone for teleport, spectate, and kill.", nextOrder())
+		guideRow(centerHolder, "Misc", "Bring grabs the selected player with the robo arms and teleports them away.", nextOrder())
 		guideRow(centerHolder, "Settings", "Keybinds, theme, or unload the hub.", nextOrder())
 		heading(centerHolder, "Activity", nextOrder())
 		for _, line in ipairs(logs) do
@@ -5567,7 +5807,7 @@ function renderPage()
 		local picked = selectedPlayer()
 		if picked then
 			note(centerHolder, picked.DisplayName .. "   @" .. picked.Name .. "   " .. tostring(picked.UserId), nextOrder())
-			note(centerHolder, "Used for teleport, spectate, and auto kill. Click the selected card again to unselect.", nextOrder())
+			note(centerHolder, "Used for teleport, spectate, auto kill, and bring. Click the selected card again to unselect.", nextOrder())
 		else
 			note(centerHolder, "Nobody selected. Click a player on the right. Your own card stays labeled YOU.", nextOrder())
 		end
@@ -5599,6 +5839,37 @@ function renderPage()
 				ok = pcall(setclipboard, player.Name)
 			end
 			pushLog(ok and ("Copied " .. player.Name) or player.Name)
+		end)
+		animatePage()
+		return
+	end
+
+	if state.page == "Misc" then
+		heading(centerHolder, "Mech", nextOrder())
+		note(centerHolder, "Bring uses the robo arms on the selected player. Stand within about 28 studs. When the arms grab them, it teleports that player away. It does not press the mech blaster, and it does not move you.", nextOrder())
+		local picked = selectedPlayer()
+		note(centerHolder, picked and ("Target: " .. picked.DisplayName) or "Pick a player on the right.", nextOrder())
+		toggleRow(centerHolder, "Bring", nextOrder(), state.bring == true, function()
+			if not state.bring and not requireGame() then
+				return
+			end
+			state.bring = not state.bring
+			state.justToggled = "Bring"
+			if not state.bring then
+				state.bringLink = nil
+				state.bringHeld = nil
+				state.bringToss = 0
+				state.bringWasHeld = nil
+			end
+			pushLog(state.bring and "Bring on" or "Bring off")
+			renderPage()
+		end)
+		stepRow(centerHolder, "Away", nextOrder(), tostring(state.bringStuds) .. " studs", function()
+			state.bringStuds = math.max(20, (state.bringStuds or 80) - 20)
+			renderPage()
+		end, function()
+			state.bringStuds = math.min(200, (state.bringStuds or 80) + 20)
+			renderPage()
 		end)
 		animatePage()
 		return
@@ -6543,7 +6814,7 @@ sideLayout.Padding = UDim.new(0, 4)
 sideLayout.SortOrder = Enum.SortOrder.LayoutOrder
 sideLayout.Parent = sideList
 
-local pages = { "Home", "Move", "Teleport", "PvP", "Materials", "Visuals", "Players", "Settings" }
+local pages = { "Home", "Move", "Teleport", "PvP", "Materials", "Visuals", "Players", "Misc", "Settings" }
 for index, name in ipairs(pages) do
 	local button = Instance.new("TextButton")
 	button.Size = UDim2.new(1, 0, 0, 30)

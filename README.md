@@ -4,7 +4,7 @@
 loadstring(game:HttpGet("https://raw.githubusercontent.com/fungamer1234/voidz-portal/main/VOIDZ_PORTAL.lua", true))()
 ```
 
-Build `2026-10-29-1.6.38`
+Build `2026-10-29-1.6.39`
 
 Game: [Portal Sandbox](https://www.roblox.com/games/75108253383447/Portal-Sandbox). PlaceId `75108253383447`.
 
@@ -25,7 +25,8 @@ Home lists every tab and the activity log. Click a row to open that tab. The ope
 - **PvP.** Auto kill keeps teleporting you behind the player, including when they turn or move their body in first person, and turns you to face them until you turn it off. Your crosshair stays on that player so you can shoot. The mouse pointer still reaches the hub, and you can zoom, including first person. Auto fire is a separate toggle that shoots the weapon in your hand. A selected player is the only target, and the script waits when they are gone. Keep away steps you back when another player gets inside the range, 15 studs by default and up to 200. While it is on you phase through buildings. The push pauses during auto kill, fly, and material pickup. Mech escape keeps tapping space while a grab or slam is holding you, and stops once you are free. It does not hold jump. Home when hurt snaps you to your house spawn the moment health drops under the percent you set, including a hit that drops you to 0. Blink when hit teleports you about 20 feet away from the nearest player so they cannot stay on you. It waits until that hop finishes before it hops again.
 - **Materials.** Auto collect stands on ground scrap, fires the pickup, and stays until the game takes it, then moves to the next closest. It skips chairs. Choose a material to grab only that type. Zone route instantly teleports you onto each material area, takes at most 10, then teleports straight to the next area. It does not use the portal gun or the dimension menu.
 - **Visuals.** Client-side player highlights, fullbright, and field of view.
-- **Players.** The list on the right selects a player. The selected card uses the theme color and is labeled SELECTED. Your own card says YOU and cannot be selected. Click a selected card again, or press Unselect, to clear it. Teleport, spectate, and auto kill use that player while their character is in the world, even if the health number reads 0. Teleport follows their torso instead of a one-time jump.
+- **Players.** The list on the right selects a player. The selected card uses the theme color and is labeled SELECTED. Your own card says YOU and cannot be selected. Click a selected card again, or press Unselect, to clear it. Teleport, spectate, auto kill, and bring use that player while their character is in the world, even if the health number reads 0. Teleport follows their torso instead of a one-time jump.
+- **Misc.** Bring grabs the selected player with the robo arms. Stand within about 28 studs. When the arms grab them, it teleports that player away by the distance you set (80 studs by default, up to 200). It sends V only when the arms are not already out, it does not press the mech blaster, and it does not move you. If the grab does not give control of that player, the log says so.
 - **Settings.** Keybinds cover fly, walk speed, auto collect, zone route, and keep away. Minus is fly until you change it. Unload script turns off every feature the hub enabled, restores your character, camera, lighting, and field of view, and removes the window.
 
 Phasing checks your character a few times a second, keep away looks for nearby players on that same pace, and the window glow does not repaint every frame. Home when hurt still snaps as soon as you are pulled away from the house.
