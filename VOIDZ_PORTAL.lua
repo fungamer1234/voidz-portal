@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.23
+-- BUILD 2026-10-29-1.6.24
 -- Place 75108253383447 · Universe 10767619742
 -- RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.23"
+local BUILD = "2026-10-29-1.6.24"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -104,6 +104,7 @@ local state = {
 	locking = false,
 	autoBuild = false,
 	autoMat = false,
+	zoneMat = false,
 	material = nil,
 	matOpen = false,
 	matList = {},
@@ -941,6 +942,16 @@ local function closestMaterial(origin)
 		elseif wasTried(part) then
 			-- leave it for a later pass
 		else
+			local zoneSkip = false
+			if state.zoneMat and state.zoneNameOf then
+				local zoneName = state.zoneNameOf(part)
+				if (state.zoneDone and state.zoneDone[zoneName]) or (state.zoneKey and zoneName ~= state.zoneKey) then
+					zoneSkip = true
+				end
+			end
+			if zoneSkip then
+				continue
+			end
 			local dist = (part.Position - origin).Magnitude
 			if hasPickupSignal and hasPickupSignal(part) then
 				if dist < signalDist then
@@ -1201,6 +1212,10 @@ local function revertFeatures()
 	state.iqBusy = false
 	state.autoBuild = false
 	state.autoMat = false
+	state.zoneMat = false
+	state.zoneKey = nil
+	state.zoneGot = 0
+	state.zoneDone = nil
 	do
 		local _, _, root = characterParts()
 		if root and state.matFocus then
@@ -2591,6 +2606,16 @@ local function closestGround(origin)
 		for _, part in ipairs(parts) do
 			if not seen[part] and part.Parent and not wasTried(part) and materialEligible(part) and not partMentionsIq(part) then
 				seen[part] = true
+				local zoneSkip = false
+				if state.zoneMat and state.zoneNameOf then
+					local zoneName = state.zoneNameOf(part)
+					if (state.zoneDone and state.zoneDone[zoneName]) or (state.zoneKey and zoneName ~= state.zoneKey) then
+						zoneSkip = true
+					end
+				end
+				if zoneSkip then
+					continue
+				end
 				local dist = (part.Position - origin).Magnitude
 				if hasPickupSignal(part) then
 					if dist < signalDist then
@@ -2627,14 +2652,40 @@ local function nextGroundPart(origin)
 end
 
 local function runMaterials(root)
-	local scraping = state.autoMat or (state.autoQuest and state.questCollect)
+	local function zoneNameOf(part)
+		local host = part.Parent
+		while host and host ~= workspace and host ~= game do
+			local blob = string.lower(host.Name)
+			local named = string.find(blob, "zone", 1, true)
+				or string.find(blob, "area", 1, true)
+				or string.find(blob, "region", 1, true)
+			if named and not string.find(blob, "dimension", 1, true) then
+				local huge = false
+				if host:IsA("Model") then
+					local ok, size = pcall(function()
+						return host:GetExtentsSize()
+					end)
+					if ok and size and (size.X > 500 or size.Z > 500) then
+						huge = true
+					end
+				end
+				if not huge then
+					return host:GetFullName()
+				end
+			end
+			host = host.Parent
+		end
+		return tostring(math.floor(part.Position.X / 160)) .. ":" .. tostring(math.floor(part.Position.Z / 160))
+	end
+	state.zoneNameOf = zoneNameOf
+	local scraping = state.autoMat or state.zoneMat or (state.autoQuest and state.questCollect)
 	if not scraping or not inPortal() then
 		if state.matFocus then
 			clearMaterialFocus(root)
 		end
 		return
 	end
-	if state.autoIq and not state.autoMat then
+	if state.autoIq and not state.autoMat and not state.zoneMat then
 		if state.matFocus then
 			clearMaterialFocus(root)
 		end
@@ -2657,6 +2708,9 @@ local function runMaterials(root)
 			local label = state.matLabel or "material"
 			clearMaterialFocus(root)
 			pushLog("Collected " .. tostring(label))
+			if state.zoneMat then
+				state.zoneGot = (state.zoneGot or 0) + 1
+			end
 			state.nextMat = 0
 		elseif now < (state.matUntil or 0) then
 			stayOnMaterial(root, state.matFocus)
@@ -2672,8 +2726,36 @@ local function runMaterials(root)
 	if now - (state.matScanAt or 0) > 2 then
 		scanMaterials()
 	end
+	if state.zoneMat and state.zoneKey and (state.zoneGot or 0) >= 10 then
+		state.zoneDone = state.zoneDone or {}
+		state.zoneDone[state.zoneKey] = true
+		pushLog("Zone " .. state.zoneKey .. " 10/10")
+		state.zoneKey = nil
+		state.zoneGot = 0
+	end
 	local part = nextGroundPart(root.Position)
 	if not part then
+		if state.zoneMat and state.zoneKey then
+			state.zoneDone = state.zoneDone or {}
+			state.zoneDone[state.zoneKey] = true
+			pushLog("Zone " .. state.zoneKey .. " " .. tostring(state.zoneGot or 0) .. "/10")
+			state.zoneKey = nil
+			state.zoneGot = 0
+			state.nextMat = now
+			return
+		end
+		if state.zoneMat and state.zoneDone and next(state.zoneDone) then
+			state.zoneDone = {}
+			state.zoneKey = nil
+			state.zoneGot = 0
+			state.locking = false
+			if now > (state.nextMatNote or 0) then
+				state.nextMatNote = now + 6
+				pushLog("Every zone hit, starting over")
+			end
+			state.nextMat = now + 2
+			return
+		end
 		state.locking = false
 		if now > (state.nextMatNote or 0) then
 			state.nextMatNote = now + 6
@@ -2690,6 +2772,11 @@ local function runMaterials(root)
 		label = prettyMaterial(state.material) .. " " .. label
 	end
 	state.matLabel = label
+	if state.zoneMat and not state.zoneKey then
+		state.zoneKey = zoneNameOf(part)
+		state.zoneGot = 0
+		pushLog("Zone " .. state.zoneKey)
+	end
 	if state.lastMat ~= part then
 		state.lastMat = part
 		pushLog("Picking up " .. tostring(label))
@@ -2837,8 +2924,8 @@ local function fireSeatPrompt(seat)
 end
 
 local function runIq(root)
-	if state.autoMat or not state.autoIq or not inPortal() then
-		if state.autoMat or not state.autoIq then
+	if state.autoMat or state.zoneMat or not state.autoIq or not inPortal() then
+		if state.autoMat or state.zoneMat or not state.autoIq then
 			state.iqBusy = false
 		end
 		return
@@ -3453,7 +3540,7 @@ local function onHeartbeat()
 	feature("Scrap", function()
 		runMaterials(root)
 	end)
-	local scrapOn = state.autoMat or (state.autoQuest and state.questCollect)
+	local scrapOn = state.autoMat or state.zoneMat or (state.autoQuest and state.questCollect)
 	if (state.autoRegen or scrapOn) and not state.iqBusy and inPortal() and humanoid.Health > 0 and humanoid.MaxHealth > 0 then
 		if humanoid.Health < humanoid.MaxHealth * 0.45 then
 			if (state.lastRegen or 0) + 1.4 < os.clock() then
@@ -4572,7 +4659,7 @@ function renderPage()
 		guideRow(centerHolder, "Move", "Fly, noclip, speed, jump, click teleport, anti void.", nextOrder())
 		guideRow(centerHolder, "Teleport", "Home base, a saved mark, and jumps to players or nearby spots.", nextOrder())
 		guideRow(centerHolder, "PvP", "Auto kill, mech escape, and home when hurt.", nextOrder())
-		guideRow(centerHolder, "Materials", "Stand on scrap and pick it up.", nextOrder())
+		guideRow(centerHolder, "Materials", "Stand on scrap, or take 10 from each area.", nextOrder())
 		guideRow(centerHolder, "Visuals", "ESP, fullbright, and field of view.", nextOrder())
 		guideRow(centerHolder, "Players", "Select someone for teleport, spectate, and kill.", nextOrder())
 		guideRow(centerHolder, "Settings", "Stop features or unload the hub.", nextOrder())
@@ -4845,7 +4932,7 @@ function renderPage()
 			left = #state.matIndex[state.material]
 		end
 		heading(centerHolder, "Collect", nextOrder())
-		note(centerHolder, "Stands on the closest scrap, fires the pickup, and stays until the game takes it. Then it goes to the next one. It skips chairs.", nextOrder())
+		note(centerHolder, "Auto collect stands on the closest scrap, fires the pickup, and stays until the game takes it. Zone route does that in one area, stops at 10, then moves to the next area.", nextOrder())
 		note(centerHolder, "Selected: " .. chosen .. "  ·  " .. tostring(left) .. " left. Found " .. tostring(#state.matList) .. " types.", nextOrder())
 		actionButton(centerHolder, "Scan materials", nextOrder(), function()
 			if not requireGame() then
@@ -4888,6 +4975,24 @@ function renderPage()
 				state.locking = false
 			end
 			pushLog(state.autoMat and "Auto collect on" or "Auto collect off")
+			renderPage()
+		end)
+		toggleRow(centerHolder, "Zone route", nextOrder(), state.zoneMat, function()
+			if not state.zoneMat and not requireGame() then
+				return
+			end
+			state.zoneMat = not state.zoneMat
+			state.zoneKey = nil
+			state.zoneGot = 0
+			state.zoneDone = nil
+			if state.zoneMat then
+				scanMaterials()
+			elseif not state.autoMat then
+				local _, _, root = characterParts()
+				clearMaterialFocus(root)
+				state.locking = false
+			end
+			pushLog(state.zoneMat and "Zone route on, 10 each" or "Zone route off")
 			renderPage()
 		end)
 		actionButton(centerHolder, "Drop held parts", nextOrder(), function()
