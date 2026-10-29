@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.28
+-- BUILD 2026-10-29-1.6.29
 -- Place 75108253383447 · Universe 10767619742
--- RightShift shows and hides the hub.
+-- The picture button or RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.28"
+local BUILD = "2026-10-29-1.6.29"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -40,16 +40,16 @@ if stale then
 end
 
 local C = {
-	bg = Color3.fromRGB(14, 14, 16),
-	bar = Color3.fromRGB(18, 18, 20),
-	side = Color3.fromRGB(16, 16, 18),
-	card = Color3.fromRGB(28, 28, 32),
-	card2 = Color3.fromRGB(40, 40, 46),
-	line = Color3.fromRGB(55, 55, 62),
-	text = Color3.fromRGB(245, 245, 247),
-	muted = Color3.fromRGB(160, 160, 170),
-	accent = Color3.fromRGB(186, 132, 255),
-	good = Color3.fromRGB(110, 220, 160),
+	bg = Color3.fromRGB(6, 12, 8),
+	bar = Color3.fromRGB(8, 16, 10),
+	side = Color3.fromRGB(7, 14, 9),
+	card = Color3.fromRGB(12, 22, 14),
+	card2 = Color3.fromRGB(20, 38, 22),
+	line = Color3.fromRGB(64, 104, 46),
+	text = Color3.fromRGB(244, 250, 236),
+	muted = Color3.fromRGB(186, 206, 172),
+	accent = Color3.fromRGB(176, 236, 72),
+	good = Color3.fromRGB(140, 230, 90),
 	warn = Color3.fromRGB(255, 196, 120),
 	bad = Color3.fromRGB(255, 120, 130),
 }
@@ -4527,18 +4527,28 @@ end
 
 local function note(parent, text, order)
 	local label = Instance.new("TextLabel")
-	label.BackgroundTransparency = 1
+	label.BackgroundColor3 = C.card
+	label.BackgroundTransparency = 0.08
 	label.Size = UDim2.new(1, 0, 0, 0)
 	label.AutomaticSize = Enum.AutomaticSize.Y
 	label.Font = Enum.Font.Gotham
 	label.TextSize = 13
-	label.TextColor3 = C.muted
+	label.TextColor3 = C.text
+	label.TextStrokeColor3 = Color3.new(0, 0, 0)
+	label.TextStrokeTransparency = 0.55
 	label.TextWrapped = true
 	label.TextXAlignment = Enum.TextXAlignment.Left
 	label.TextYAlignment = Enum.TextYAlignment.Top
 	label.Text = text
 	label.LayoutOrder = order
 	label.Parent = parent
+	corner(label, 8)
+	local pad = Instance.new("UIPadding")
+	pad.PaddingTop = UDim.new(0, 6)
+	pad.PaddingBottom = UDim.new(0, 6)
+	pad.PaddingLeft = UDim.new(0, 8)
+	pad.PaddingRight = UDim.new(0, 8)
+	pad.Parent = label
 	return label
 end
 
@@ -4549,6 +4559,8 @@ local function heading(parent, text, order)
 	label.Font = Enum.Font.GothamBold
 	label.TextSize = 11
 	label.TextColor3 = C.accent
+	label.TextStrokeColor3 = Color3.new(0, 0, 0)
+	label.TextStrokeTransparency = 0.45
 	label.TextXAlignment = Enum.TextXAlignment.Left
 	label.TextYAlignment = Enum.TextYAlignment.Bottom
 	label.Text = string.upper(text)
@@ -4653,7 +4665,7 @@ local function toggleRow(parent, title, order, isOn, callback)
 	local pill = Instance.new("TextButton")
 	pill.Size = UDim2.fromOffset(42, 22)
 	pill.Position = UDim2.new(1, -52, 0.5, -11)
-	pill.BackgroundColor3 = isOn and C.accent or Color3.fromRGB(58, 58, 66)
+	pill.BackgroundColor3 = isOn and C.accent or Color3.fromRGB(32, 46, 30)
 	pill.Text = ""
 	pill.AutoButtonColor = false
 	pill.Parent = row
@@ -4736,7 +4748,7 @@ local function renderPlayers()
 			local picked = (not mine) and state.selected == player.UserId
 			local card = Instance.new("TextButton")
 			card.Size = UDim2.new(1, 0, 0, 64)
-			card.BackgroundColor3 = picked and Color3.fromRGB(62, 40, 92) or C.card
+			card.BackgroundColor3 = picked and Color3.fromRGB(24, 52, 22) or C.card
 			card.AutoButtonColor = false
 			card.Text = ""
 			card.LayoutOrder = shown
@@ -4881,7 +4893,7 @@ function renderPage()
 
 	if state.page == "Home" then
 		local where = inPortal() and "Portal Sandbox is loaded." or "This place is not Portal Sandbox. Join the game, then execute again."
-		note(centerHolder, where .. " Build " .. BUILD .. ". RightShift hides the hub.", nextOrder())
+		note(centerHolder, where .. " Build " .. BUILD .. ". Click the picture button to hide the hub. Drag that button anywhere. RightShift does the same.", nextOrder())
 		heading(centerHolder, "Tabs", nextOrder())
 		guideRow(centerHolder, "Move", "Fly, noclip, speed, jump, click teleport, anti void.", nextOrder())
 		guideRow(centerHolder, "Teleport", "Home base, a saved mark, and jumps to players or nearby spots.", nextOrder())
@@ -5293,7 +5305,7 @@ function renderPage()
 		local picked = selectedPlayer()
 		if picked then
 			note(centerHolder, picked.DisplayName .. "   @" .. picked.Name .. "   " .. tostring(picked.UserId), nextOrder())
-			note(centerHolder, "Used for teleport, spectate, and auto kill. Click the purple card again to unselect.", nextOrder())
+			note(centerHolder, "Used for teleport, spectate, and auto kill. Click the green card again to unselect.", nextOrder())
 		else
 			note(centerHolder, "Nobody selected. Click a player on the right. Your own card stays labeled YOU.", nextOrder())
 		end
@@ -5332,7 +5344,7 @@ function renderPage()
 	if state.page == "Settings" then
 		heading(centerHolder, "Session", nextOrder())
 		note(centerHolder, "Unload turns off movement, combat, mech escape, home, and auto collect. It removes ESP, restores lighting and field of view, and deletes this window.", nextOrder())
-		note(centerHolder, "Build " .. BUILD .. ". RightShift hides the hub. The chat bar stays available.", nextOrder())
+		note(centerHolder, "Build " .. BUILD .. ". The picture button and RightShift hide the hub. The chat bar stays available.", nextOrder())
 		actionButton(centerHolder, "Unload script", nextOrder(), function()
 			if type(ENV.VOIDZ_PORTAL_STOP) == "function" then
 				ENV.VOIDZ_PORTAL_STOP()
@@ -5399,11 +5411,151 @@ window.Active = true
 window.ClipsDescendants = true
 window.Parent = gui
 corner(window, 12)
+;(function()
+	local function loadAsset(names)
+		if type(getcustomasset) ~= "function" then
+			return nil
+		end
+		for _, name in ipairs(names) do
+			if type(isfile) == "function" then
+				local exists = false
+				pcall(function()
+					exists = isfile(name)
+				end)
+				if not exists then
+					continue
+				end
+			end
+			local ok, id = pcall(getcustomasset, name)
+			if ok and type(id) == "string" and id ~= "" then
+				return id
+			end
+		end
+		return nil
+	end
+	local portalId = loadAsset({ "voidz-portal/portal.png", "portal.png" })
+	local toggleId = loadAsset({ "voidz-portal/toggle.jpg", "toggle.jpg" })
+	local introId = loadAsset({ "voidz-portal/intro.mp3", "intro.mp3" })
+	if portalId then
+		local portal = Instance.new("ImageLabel")
+		portal.Name = "Portal"
+		portal.BackgroundColor3 = Color3.fromRGB(4, 10, 6)
+		portal.BackgroundTransparency = 0
+		portal.BorderSizePixel = 0
+		portal.Size = UDim2.fromScale(1, 1)
+		portal.Image = portalId
+		portal.ScaleType = Enum.ScaleType.Crop
+		portal.ImageTransparency = 0.12
+		portal.ZIndex = 1
+		portal.Active = false
+		portal.Parent = window
+		local dim = Instance.new("Frame")
+		dim.Name = "PortalDim"
+		dim.BackgroundColor3 = Color3.fromRGB(4, 8, 6)
+		dim.BackgroundTransparency = 0.62
+		dim.BorderSizePixel = 0
+		dim.Size = UDim2.fromScale(1, 1)
+		dim.ZIndex = 2
+		dim.Active = false
+		dim.Parent = window
+	end
+	local theme = Instance.new("Sound")
+	theme.Name = "VOIDZ_Theme"
+	theme.SoundId = introId or ""
+	theme.Volume = 0.7
+	theme.Looped = false
+	theme.Parent = gui
+	local function playIntro()
+		if theme.SoundId == "" then
+			return
+		end
+		theme:Stop()
+		theme.TimePosition = 12
+		theme:Play()
+		theme.TimePosition = 12
+		state.themeUntil = os.clock() + 8.2
+	end
+	state.toggleHub = function()
+		window.Visible = not window.Visible
+		keepChat()
+		if window.Visible then
+			playIntro()
+		else
+			theme:Stop()
+		end
+	end
+	local opener = Instance.new("ImageButton")
+	opener.Name = "VOIDZ_Open"
+	opener.AnchorPoint = Vector2.new(0, 0)
+	opener.Position = UDim2.fromOffset(18, 96)
+	opener.Size = UDim2.fromOffset(64, 64)
+	opener.BackgroundColor3 = C.accent
+	opener.BackgroundTransparency = toggleId and 1 or 0
+	opener.BorderSizePixel = 0
+	opener.Image = toggleId or ""
+	opener.ScaleType = Enum.ScaleType.Crop
+	opener.AutoButtonColor = false
+	opener.ZIndex = 8
+	opener.Parent = gui
+	corner(opener, 10)
+	local openerStroke = Instance.new("UIStroke")
+	openerStroke.Color = C.accent
+	openerStroke.Thickness = 2
+	openerStroke.Parent = opener
+	local moving = false
+	local pressAt = nil
+	local dragOrigin = nil
+	local openerOrigin = opener.Position
+	opener.InputBegan:Connect(function(input)
+		if input.UserInputType ~= Enum.UserInputType.MouseButton1 then
+			return
+		end
+		moving = true
+		pressAt = input.Position
+		dragOrigin = input.Position
+		openerOrigin = opener.Position
+	end)
+	bind(UserInputService.InputChanged, function(input)
+		if not moving or not dragOrigin or input.UserInputType ~= Enum.UserInputType.MouseMovement then
+			return
+		end
+		local delta = input.Position - dragOrigin
+		local camera = workspace.CurrentCamera
+		local view = camera and camera.ViewportSize or Vector2.new(1280, 720)
+		local x = math.clamp(openerOrigin.X.Offset + delta.X, 8, math.max(8, view.X - 72))
+		local y = math.clamp(openerOrigin.Y.Offset + delta.Y, 8, math.max(8, view.Y - 72))
+		opener.Position = UDim2.fromOffset(x, y)
+	end)
+	bind(UserInputService.InputEnded, function(input)
+		if not moving or not pressAt or input.UserInputType ~= Enum.UserInputType.MouseButton1 then
+			return
+		end
+		moving = false
+		local delta = input.Position - pressAt
+		if math.abs(delta.X) < 8 and math.abs(delta.Y) < 8 then
+			state.toggleHub()
+		end
+	end)
+	bind(RunService.Heartbeat, function()
+		if not theme.IsPlaying then
+			return
+		end
+		if theme.TimePosition < 12 then
+			theme.TimePosition = 12
+		end
+		if theme.TimePosition >= 20 or os.clock() >= (state.themeUntil or 0) then
+			theme:Stop()
+		end
+	end)
+	if introId then
+		task.defer(playIntro)
+	end
+end)()
 local wash = Instance.new("UIGradient")
 wash.Color = ColorSequence.new({
-	ColorSequenceKeypoint.new(0, Color3.fromRGB(54, 28, 92)),
-	ColorSequenceKeypoint.new(0.42, Color3.fromRGB(14, 12, 20)),
-	ColorSequenceKeypoint.new(1, Color3.fromRGB(36, 22, 68)),
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(16, 64, 24)),
+	ColorSequenceKeypoint.new(0.42, Color3.fromRGB(5, 10, 7)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(42, 72, 16)),
 })
 wash.Rotation = 28
 wash.Parent = window
@@ -5426,9 +5578,10 @@ local top = Instance.new("Frame")
 top.Name = "Top"
 top.Size = UDim2.new(1, 0, 0, 52)
 top.BackgroundColor3 = C.bar
-top.BackgroundTransparency = 0.22
+top.BackgroundTransparency = 0.1
 top.BorderSizePixel = 0
 top.Active = true
+top.ZIndex = 4
 top.Parent = window
 corner(top, 12)
 local topFill = Instance.new("Frame")
@@ -5475,7 +5628,9 @@ title.Size = UDim2.fromOffset(220, 22)
 title.Font = Enum.Font.GothamBold
 title.TextSize = 18
 title.TextXAlignment = Enum.TextXAlignment.Left
-title.TextColor3 = C.text
+title.TextColor3 = C.accent
+title.TextStrokeColor3 = Color3.new(0, 0, 0)
+title.TextStrokeTransparency = 0.45
 title.Text = "VOIDZ HUB"
 title.Parent = top
 
@@ -5540,12 +5695,13 @@ body.Name = "Body"
 body.Position = UDim2.fromOffset(0, 52)
 body.Size = UDim2.new(1, 0, 1, -52)
 body.BackgroundTransparency = 1
+body.ZIndex = 4
 body.Parent = window
 
 local side = Instance.new("Frame")
 side.Size = UDim2.new(0, 168, 1, 0)
 side.BackgroundColor3 = C.side
-side.BackgroundTransparency = 0.3
+side.BackgroundTransparency = 0.06
 side.BorderSizePixel = 0
 side.Parent = body
 
@@ -5633,7 +5789,7 @@ right.AnchorPoint = Vector2.new(1, 0)
 right.Position = UDim2.new(1, 0, 0, 0)
 right.Size = UDim2.new(0, 232, 1, 0)
 right.BackgroundColor3 = C.side
-right.BackgroundTransparency = 0.3
+right.BackgroundTransparency = 0.06
 right.BorderSizePixel = 0
 right.Parent = body
 
@@ -5692,8 +5848,12 @@ end)
 
 bind(UserInputService.InputBegan, function(input, processed)
 	if input.KeyCode == Enum.KeyCode.RightShift and not processed then
-		window.Visible = not window.Visible
-		keepChat()
+		if state.toggleHub then
+			state.toggleHub()
+		else
+			window.Visible = not window.Visible
+			keepChat()
+		end
 		return
 	end
 	if input.UserInputType == Enum.UserInputType.Keyboard then
