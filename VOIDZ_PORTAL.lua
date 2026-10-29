@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.34
+-- BUILD 2026-10-29-1.6.35
 -- Place 75108253383447 · Universe 10767619742
 -- The picture button or RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.34"
+local BUILD = "2026-10-29-1.6.35"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -108,6 +108,19 @@ local state = {
 	souljaAudio = false,
 	evilAudio = false,
 	musicOn = true,
+	shove = false,
+	shoveStuds = 15,
+	shoveNear = false,
+	justToggled = nil,
+	hubBusy = false,
+	captureBind = nil,
+	binds = {
+		fly = "Minus",
+		speed = "None",
+		mats = "None",
+		zone = "None",
+		shove = "None",
+	},
 	material = nil,
 	matOpen = false,
 	matList = {},
@@ -597,6 +610,7 @@ local function sweepHubObjects()
 		VOIDZ_FlyBV = true,
 		VOIDZ_WalkBV = true,
 		VOIDZ_KillHold = true,
+		VOIDZ_Shove = true,
 	}
 	for _, player in ipairs(Players:GetPlayers()) do
 		local character = player.Character
@@ -618,6 +632,10 @@ local function restoreCharacter()
 		local walkPush = root:FindFirstChild("VOIDZ_WalkBV")
 		if walkPush then
 			walkPush:Destroy()
+		end
+		local shovePush = root:FindFirstChild("VOIDZ_Shove")
+		if shovePush then
+			shovePush:Destroy()
 		end
 	end
 	if humanoid then
@@ -1216,6 +1234,8 @@ local function revertFeatures()
 	state.autoBuild = false
 	state.autoMat = false
 	state.zoneMat = false
+	state.shove = false
+	state.shoveNear = false
 	state.zoneKey = nil
 	state.zoneGot = 0
 	state.zoneDone = nil
@@ -3765,6 +3785,66 @@ local function onHeartbeat()
 			clearFly(root)
 		end
 	end
+	local function clearShove()
+		state.shoveNear = false
+		local oldPush = root:FindFirstChild("VOIDZ_Shove")
+		if oldPush then
+			oldPush:Destroy()
+		end
+	end
+	local canShove = state.shove
+		and inPortal()
+		and not state.autoKill
+		and not state.killPart
+		and not state.fly
+		and not state.fleeing
+		and not state.mechHeld
+		and not state.iqBusy
+		and not materialHoldActive()
+		and not state.portalCf
+		and not humanoid.SeatPart
+	if canShove then
+		local limit = state.shoveStuds or 15
+		if limit < 8 then
+			limit = 8
+		elseif limit > 30 then
+			limit = 30
+		end
+		local away = Vector3.zero
+		local closest = limit
+		for _, player in ipairs(Players:GetPlayers()) do
+			if player ~= LocalPlayer and not sameTeam(player) then
+				local part = playerRoot(player)
+				if part then
+					local flat = Vector3.new(root.Position.X - part.Position.X, 0, root.Position.Z - part.Position.Z)
+					local dist = flat.Magnitude
+					if dist > 0.2 and dist < closest then
+						closest = dist
+						away = flat.Unit
+					end
+				end
+			end
+		end
+		if away.Magnitude > 0.5 then
+			state.shoveNear = true
+			local push = root:FindFirstChild("VOIDZ_Shove")
+			if not push then
+				push = Instance.new("BodyVelocity")
+				push.Name = "VOIDZ_Shove"
+				push.MaxForce = Vector3.new(250000, 0, 250000)
+				push.Parent = root
+			end
+			local power = 36 + (limit - closest) * 3
+			if power > 78 then
+				power = 78
+			end
+			push.Velocity = away * power
+		else
+			clearShove()
+		end
+	elseif root:FindFirstChild("VOIDZ_Shove") or state.shoveNear then
+		clearShove()
+	end
 	if state.antiVoid and inPortal() and not state.autoKill then
 		if root.Position.Y > 8 and humanoid.FloorMaterial ~= Enum.Material.Air then
 			state.safe = root.CFrame
@@ -4613,6 +4693,9 @@ local function guideRow(parent, title, detail, order)
 		}):Play()
 	end)
 	row.MouseButton1Click:Connect(function()
+		if state.pulse then
+			state.pulse(row)
+		end
 		state.page = title
 		renderPage()
 	end)
@@ -4643,6 +4726,9 @@ local function actionButton(parent, text, order, callback, background)
 		}):Play()
 	end)
 	button.MouseButton1Click:Connect(function()
+		if state.pulse then
+			state.pulse(button)
+		end
 		pcall(callback)
 	end)
 	return button
@@ -4665,21 +4751,36 @@ local function toggleRow(parent, title, order, isOn, callback)
 	label.TextColor3 = C.text
 	label.Text = title
 	label.Parent = row
+	local offColor = state.evilAudio and Color3.fromRGB(54, 40, 18) or Color3.fromRGB(32, 46, 30)
+	local onPos = UDim2.new(1, -19, 0.5, -8)
+	local offPos = UDim2.fromOffset(3, 3)
+	local slide = state.justToggled == title
 	local pill = Instance.new("TextButton")
 	pill.Size = UDim2.fromOffset(42, 22)
 	pill.Position = UDim2.new(1, -52, 0.5, -11)
-	pill.BackgroundColor3 = isOn and C.accent or (state.evilAudio and Color3.fromRGB(54, 40, 18) or Color3.fromRGB(32, 46, 30))
+	pill.BackgroundColor3 = slide and (isOn and offColor or C.accent) or (isOn and C.accent or offColor)
 	pill.Text = ""
 	pill.AutoButtonColor = false
 	pill.Parent = row
 	corner(pill, 11)
 	local knob = Instance.new("Frame")
 	knob.Size = UDim2.fromOffset(16, 16)
-	knob.Position = isOn and UDim2.new(1, -19, 0.5, -8) or UDim2.fromOffset(3, 3)
+	knob.Position = slide and (isOn and offPos or onPos) or (isOn and onPos or offPos)
 	knob.BackgroundColor3 = Color3.new(1, 1, 1)
 	knob.Parent = pill
 	corner(knob, 8)
+	if slide then
+		TweenService:Create(knob, TweenInfo.new(0.18, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+			Position = isOn and onPos or offPos,
+		}):Play()
+		TweenService:Create(pill, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			BackgroundColor3 = isOn and C.accent or offColor,
+		}):Play()
+	end
 	pill.MouseButton1Click:Connect(function()
+		if state.pulse then
+			state.pulse(row)
+		end
 		pcall(callback)
 	end)
 	return row
@@ -4715,6 +4816,9 @@ local function stepRow(parent, title, order, valueText, onLess, onMore)
 		button.Parent = row
 		corner(button, 6)
 		button.MouseButton1Click:Connect(function()
+			if state.pulse then
+				state.pulse(button)
+			end
 			pcall(callback)
 		end)
 	end
@@ -4828,6 +4932,9 @@ local function renderPlayers()
 				if mine then
 					return
 				end
+				if state.pulse then
+					state.pulse(card)
+				end
 				if state.selected == userIdValue then
 					state.selected = nil
 					pushLog("Unselected " .. displayName)
@@ -4866,10 +4973,21 @@ local function animatePage()
 	if not centerHolder then
 		return
 	end
-	centerHolder.Position = UDim2.fromOffset(18, 10)
+	centerHolder.Position = UDim2.fromOffset(18, 8)
+	local pop = centerHolder:FindFirstChild("PagePop")
+	if not pop then
+		pop = Instance.new("UIScale")
+		pop.Name = "PagePop"
+		pop.Parent = centerHolder
+	end
+	pop.Scale = 0.98
 	TweenService:Create(centerHolder, TweenInfo.new(0.22, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
 		Position = UDim2.fromOffset(4, 4),
 	}):Play()
+	TweenService:Create(pop, TweenInfo.new(0.22, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+		Scale = 1,
+	}):Play()
+	state.justToggled = nil
 end
 
 function renderPage()
@@ -4881,11 +4999,11 @@ function renderPage()
 		Home = "Overview",
 		Move = "Fly, speed, and travel",
 		Teleport = "Home and jumps",
-		PvP = "Kill, escape, and home",
+		PvP = "Kill, space, and home",
 		Materials = "Ground scrap",
 		Visuals = "Client look",
 		Players = "Teleport, spectate, kill",
-		Settings = "Stop or unload",
+		Settings = "Keys, theme, unload",
 	}
 	pageTitle.Text = hints[state.page] or state.page
 	markNav()
@@ -4899,13 +5017,13 @@ function renderPage()
 		local where = inPortal() and "Portal Sandbox is loaded." or "This place is not Portal Sandbox. Join the game, then execute again."
 		note(centerHolder, where .. " Build " .. BUILD .. ". Click the picture button to hide the hub. Drag that button anywhere. RightShift does the same.", nextOrder())
 		heading(centerHolder, "Tabs", nextOrder())
-		guideRow(centerHolder, "Move", "Fly, noclip, speed, jump, click teleport, anti void.", nextOrder())
+		guideRow(centerHolder, "Move", "Fly on minus, noclip, speed, jump, click teleport, anti void.", nextOrder())
 		guideRow(centerHolder, "Teleport", "Home base, a saved mark, and jumps to players or nearby spots.", nextOrder())
-		guideRow(centerHolder, "PvP", "Auto kill, mech escape, and home when hurt.", nextOrder())
+		guideRow(centerHolder, "PvP", "Auto kill, keep away, mech escape, and home when hurt.", nextOrder())
 		guideRow(centerHolder, "Materials", "Stand on scrap, or take 10 from each area.", nextOrder())
 		guideRow(centerHolder, "Visuals", "ESP, fullbright, and field of view.", nextOrder())
 		guideRow(centerHolder, "Players", "Select someone for teleport, spectate, and kill.", nextOrder())
-		guideRow(centerHolder, "Settings", "Stop features or unload the hub.", nextOrder())
+		guideRow(centerHolder, "Settings", "Keybinds, theme, or unload the hub.", nextOrder())
 		heading(centerHolder, "Activity", nextOrder())
 		for _, line in ipairs(logs) do
 			local row = Instance.new("TextLabel")
@@ -4923,22 +5041,17 @@ function renderPage()
 		if #logs == 0 then
 			note(centerHolder, "No activity yet.", nextOrder())
 		end
+		animatePage()
 		return
 	end
 
 	if state.page == "Move" then
 		heading(centerHolder, "Movement", nextOrder())
-		note(centerHolder, "Fly uses WASD. Space rises. LeftControl or LeftShift drops. Walk speed moves you at the number shown. These only run inside Portal Sandbox.", nextOrder())
+		note(centerHolder, "Fly uses WASD. Space rises. LeftControl or LeftShift drops. Minus toggles fly. Walk speed moves you at the number shown. Change keys in Settings. These only run inside Portal Sandbox.", nextOrder())
 		toggleRow(centerHolder, "Fly", nextOrder(), state.fly, function()
-			if not state.fly and not requireGame() then
-				return
+			if state.toggleFly then
+				state.toggleFly()
 			end
-			state.fly = not state.fly
-			if not state.fly then
-				clearFly()
-			end
-			pushLog(state.fly and "Fly on" or "Fly off")
-			renderPage()
 		end)
 		stepRow(centerHolder, "Fly speed", nextOrder(), tostring(state.flySpeed), function()
 			state.flySpeed = math.max(20, state.flySpeed - 20)
@@ -4959,12 +5072,9 @@ function renderPage()
 			renderPage()
 		end)
 		toggleRow(centerHolder, "Walk speed", nextOrder(), state.speed, function()
-			if not state.speed and not requireGame() then
-				return
+			if state.toggleSpeed then
+				state.toggleSpeed()
 			end
-			state.speed = not state.speed
-			pushLog(state.speed and "Speed on" or "Speed off")
-			renderPage()
 		end)
 		stepRow(centerHolder, "Walk speed", nextOrder(), tostring(state.walkSpeed), function()
 			state.walkSpeed = math.max(16, state.walkSpeed - 8)
@@ -5010,6 +5120,7 @@ function renderPage()
 			pushLog("Movement stopped")
 			renderPage()
 		end)
+		animatePage()
 		return
 	end
 
@@ -5091,6 +5202,7 @@ function renderPage()
 			end
 			teleportToPlayer(choices[math.random(1, #choices)])
 		end)
+		animatePage()
 		return
 	end
 
@@ -5164,6 +5276,21 @@ function renderPage()
 			state.homeAt = math.min(80, (state.homeAt or 30) + 5)
 			renderPage()
 		end)
+		heading(centerHolder, "Space", nextOrder())
+		note(centerHolder, "Keep away steps you back when another player gets inside the range. It pauses during auto kill, fly, and material pickup.", nextOrder())
+		toggleRow(centerHolder, "Keep away", nextOrder(), state.shove, function()
+			if state.toggleShove then
+				state.toggleShove()
+			end
+		end)
+		stepRow(centerHolder, "Keep away range", nextOrder(), tostring(state.shoveStuds) .. " studs", function()
+			state.shoveStuds = math.max(8, (state.shoveStuds or 15) - 1)
+			renderPage()
+		end, function()
+			state.shoveStuds = math.min(30, (state.shoveStuds or 15) + 1)
+			renderPage()
+		end)
+		animatePage()
 		return
 	end
 
@@ -5208,53 +5335,20 @@ function renderPage()
 			end
 		end
 		toggleRow(centerHolder, "Auto collect", nextOrder(), state.autoMat, function()
-			if not state.autoMat and not requireGame() then
-				return
+			if state.toggleMats then
+				state.toggleMats()
 			end
-			state.autoMat = not state.autoMat
-			if state.autoMat then
-				scanMaterials()
-			else
-				local _, _, root = characterParts()
-				clearMaterialFocus(root)
-				state.locking = false
-			end
-			pushLog(state.autoMat and "Auto collect on" or "Auto collect off")
-			renderPage()
 		end)
 		toggleRow(centerHolder, "Zone route", nextOrder(), state.zoneMat, function()
-			if not state.zoneMat and not requireGame() then
-				return
+			if state.toggleZone then
+				state.toggleZone()
 			end
-			state.zoneMat = not state.zoneMat
-			state.zoneKey = nil
-			state.zoneGot = 0
-			state.zoneDone = nil
-			state.zoneParts = nil
-			state.zoneScanAt = 0
-			if not state.zoneMat then
-				local hopMarker = workspace:FindFirstChild("VOIDZ_ZoneHop")
-				if hopMarker then
-					hopMarker:Destroy()
-				end
-				pcall(function()
-					LocalPlayer.ReplicationFocus = nil
-				end)
-			end
-			if state.zoneMat then
-				scanMaterials()
-			elseif not state.autoMat then
-				local _, _, root = characterParts()
-				clearMaterialFocus(root)
-				state.locking = false
-			end
-			pushLog(state.zoneMat and "Zone route on, 10 each" or "Zone route off")
-			renderPage()
 		end)
 		actionButton(centerHolder, "Drop held parts", nextOrder(), function()
 			dropHeld()
 			pushLog("Dropped held parts")
 		end)
+		animatePage()
 		return
 	end
 
@@ -5301,6 +5395,7 @@ function renderPage()
 			end
 			renderPage()
 		end)
+		animatePage()
 		return
 	end
 
@@ -5309,7 +5404,7 @@ function renderPage()
 		local picked = selectedPlayer()
 		if picked then
 			note(centerHolder, picked.DisplayName .. "   @" .. picked.Name .. "   " .. tostring(picked.UserId), nextOrder())
-			note(centerHolder, "Used for teleport, spectate, and auto kill. Click the green card again to unselect.", nextOrder())
+			note(centerHolder, "Used for teleport, spectate, and auto kill. Click the selected card again to unselect.", nextOrder())
 		else
 			note(centerHolder, "Nobody selected. Click a player on the right. Your own card stays labeled YOU.", nextOrder())
 		end
@@ -5342,6 +5437,7 @@ function renderPage()
 			end
 			pushLog(ok and ("Copied " .. player.Name) or player.Name)
 		end)
+		animatePage()
 		return
 	end
 
@@ -5399,6 +5495,69 @@ function renderPage()
 			pushLog(state.souljaAudio and "Soulja Boy theme on" or "Rick and Morty theme on")
 			renderPage()
 		end)
+		heading(centerHolder, "Keybinds", nextOrder())
+		note(centerHolder, "Minus toggles fly. Click a row, then press a key. Escape cancels. Backspace clears. RightShift still opens the hub. WASD, Space, and T Q E F R X V stay as game keys.", nextOrder())
+		local function bindRow(title, slot)
+			local row = Instance.new("Frame")
+			row.Size = UDim2.new(1, 0, 0, 36)
+			row.BackgroundColor3 = C.card
+			row.LayoutOrder = nextOrder()
+			row.Parent = centerHolder
+			corner(row, 8)
+			local label = Instance.new("TextLabel")
+			label.BackgroundTransparency = 1
+			label.Position = UDim2.fromOffset(12, 0)
+			label.Size = UDim2.new(1, -120, 1, 0)
+			label.Font = Enum.Font.GothamMedium
+			label.TextSize = 14
+			label.TextXAlignment = Enum.TextXAlignment.Left
+			label.TextColor3 = C.text
+			label.Text = title
+			label.Parent = row
+			local current = (state.binds and state.binds[slot]) or "None"
+			local listening = state.captureBind == slot
+			local shown = current
+			if listening then
+				shown = "Press a key"
+			elseif current == "Minus" then
+				shown = "-"
+			elseif current == "Equals" then
+				shown = "="
+			elseif current == "LeftBracket" then
+				shown = "["
+			elseif current == "RightBracket" then
+				shown = "]"
+			elseif current == "None" then
+				shown = "None"
+			end
+			local keyButton = Instance.new("TextButton")
+			keyButton.Size = UDim2.fromOffset(96, 24)
+			keyButton.Position = UDim2.new(1, -104, 0.5, -12)
+			keyButton.BackgroundColor3 = listening and C.accent or C.card2
+			keyButton.Font = Enum.Font.GothamBold
+			keyButton.TextSize = 12
+			keyButton.TextColor3 = listening and (state.evilAudio and Color3.fromRGB(28, 18, 6) or Color3.fromRGB(16, 32, 12)) or C.text
+			keyButton.Text = shown
+			keyButton.AutoButtonColor = false
+			keyButton.Parent = row
+			corner(keyButton, 6)
+			keyButton.MouseButton1Click:Connect(function()
+				if state.pulse then
+					state.pulse(keyButton)
+				end
+				if state.captureBind == slot then
+					state.captureBind = nil
+				else
+					state.captureBind = slot
+				end
+				renderPage()
+			end)
+		end
+		bindRow("Fly", "fly")
+		bindRow("Walk speed", "speed")
+		bindRow("Auto collect", "mats")
+		bindRow("Zone route", "zone")
+		bindRow("Keep away", "shove")
 		heading(centerHolder, "Session", nextOrder())
 		note(centerHolder, "Unload turns off movement, combat, mech escape, home, and auto collect. It removes ESP, restores lighting and field of view, and deletes this window.", nextOrder())
 		note(centerHolder, "Build " .. BUILD .. ". The picture button and RightShift hide the hub. The chat bar stays available.", nextOrder())
@@ -5528,6 +5687,18 @@ corner(window, 12)
 					if string.find(lower, "music=off", 1, true) or string.find(lower, "music=0", 1, true) then
 						music = false
 					end
+					for key, value in string.gmatch(body, "([%a]+)=([%w]+)") do
+						local slot = string.lower(key)
+						local known = value == "None"
+						if not known then
+							pcall(function()
+								known = Enum.KeyCode[value] ~= nil
+							end)
+						end
+						if (slot == "fly" or slot == "speed" or slot == "mats" or slot == "zone" or slot == "shove") and known and state.binds then
+							state.binds[slot] = value
+						end
+					end
 					return themeName, music
 				end
 			end
@@ -5555,9 +5726,136 @@ corner(window, 12)
 		elseif state.evilAudio then
 			picked = "evil"
 		end
+		local binds = state.binds or {}
 		local body = "theme=" .. picked .. "\nmusic=" .. ((state.musicOn ~= false) and "on" or "off")
+			.. "\nfly=" .. (binds.fly or "Minus")
+			.. "\nspeed=" .. (binds.speed or "None")
+			.. "\nmats=" .. (binds.mats or "None")
+			.. "\nzone=" .. (binds.zone or "None")
+			.. "\nshove=" .. (binds.shove or "None")
 		pcall(writefile, "voidz-portal/theme.txt", body)
 		pcall(writefile, "voidz_portal_theme.txt", body)
+	end
+	state.pulse = function(guiObject)
+		if not guiObject or not guiObject.Parent then
+			return
+		end
+		local scale = guiObject:FindFirstChild("ClickScale")
+		if not scale then
+			scale = Instance.new("UIScale")
+			scale.Name = "ClickScale"
+			scale.Parent = guiObject
+		end
+		scale.Scale = 0.94
+		TweenService:Create(scale, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			Scale = 1,
+		}):Play()
+	end
+	state.toggleFly = function()
+		if not state.fly and not requireGame() then
+			return
+		end
+		state.fly = not state.fly
+		if not state.fly then
+			clearFly()
+		end
+		state.justToggled = "Fly"
+		pushLog(state.fly and "Fly on" or "Fly off")
+		if state.page == "Move" then
+			renderPage()
+		else
+			state.justToggled = nil
+		end
+	end
+	state.toggleSpeed = function()
+		if not state.speed and not requireGame() then
+			return
+		end
+		state.speed = not state.speed
+		state.justToggled = "Walk speed"
+		pushLog(state.speed and "Speed on" or "Speed off")
+		if state.page == "Move" then
+			renderPage()
+		else
+			state.justToggled = nil
+		end
+	end
+	state.toggleMats = function()
+		if not state.autoMat and not requireGame() then
+			return
+		end
+		state.autoMat = not state.autoMat
+		if state.autoMat then
+			scanMaterials()
+		else
+			local _, _, matRoot = characterParts()
+			clearMaterialFocus(matRoot)
+			state.locking = false
+		end
+		state.justToggled = "Auto collect"
+		pushLog(state.autoMat and "Auto collect on" or "Auto collect off")
+		if state.page == "Materials" then
+			renderPage()
+		else
+			state.justToggled = nil
+		end
+	end
+	state.toggleZone = function()
+		if not state.zoneMat and not requireGame() then
+			return
+		end
+		state.zoneMat = not state.zoneMat
+		state.zoneKey = nil
+		state.zoneGot = 0
+		state.zoneDone = nil
+		state.zoneParts = nil
+		state.zoneScanAt = 0
+		if not state.zoneMat then
+			local hopMarker = workspace:FindFirstChild("VOIDZ_ZoneHop")
+			if hopMarker then
+				hopMarker:Destroy()
+			end
+			pcall(function()
+				LocalPlayer.ReplicationFocus = nil
+			end)
+		end
+		if state.zoneMat then
+			scanMaterials()
+		elseif not state.autoMat then
+			local _, _, matRoot = characterParts()
+			clearMaterialFocus(matRoot)
+			state.locking = false
+		end
+		state.justToggled = "Zone route"
+		pushLog(state.zoneMat and "Zone route on, 10 each" or "Zone route off")
+		if state.page == "Materials" then
+			renderPage()
+		else
+			state.justToggled = nil
+		end
+	end
+	state.toggleShove = function()
+		if not state.shove and not requireGame() then
+			return
+		end
+		state.shove = not state.shove
+		if not state.shove then
+			state.shoveNear = false
+			local _, _, shoveRoot = characterParts()
+			if shoveRoot then
+				local push = shoveRoot:FindFirstChild("VOIDZ_Shove")
+				if push then
+					push:Destroy()
+				end
+			end
+		end
+		state.justToggled = "Keep away"
+		pushLog(state.shove and ("Keep away " .. tostring(state.shoveStuds) .. " studs") or "Keep away off")
+		if state.page == "PvP" then
+			renderPage()
+		else
+			state.justToggled = nil
+		end
 	end
 	local portalImage = (state.evilAudio and goldPortalId) or greenPortalId
 	if portalImage then
@@ -5788,13 +6086,48 @@ corner(window, 12)
 		end
 	end
 	state.toggleHub = function()
-		window.Visible = not window.Visible
+		if state.hubBusy then
+			return
+		end
+		local scale = window:FindFirstChild("HubScale")
+		if not scale then
+			scale = Instance.new("UIScale")
+			scale.Name = "HubScale"
+			scale.Scale = 1
+			scale.Parent = window
+		end
+		local openerBtn = gui:FindFirstChild("VOIDZ_Open")
+		if openerBtn then
+			state.pulse(openerBtn)
+		end
 		keepChat()
 		if window.Visible then
+			state.hubBusy = true
+			if theme.IsPlaying then
+				state.themeAt = theme.TimePosition
+				theme:Pause()
+			end
+			TweenService:Create(scale, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+				Scale = 0.9,
+			}):Play()
+			task.delay(0.16, function()
+				if state.alive then
+					window.Visible = false
+					scale.Scale = 1
+				end
+				state.hubBusy = false
+			end)
+		else
+			window.Visible = true
+			scale.Scale = 0.88
+			state.hubBusy = true
+			TweenService:Create(scale, TweenInfo.new(0.24, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+				Scale = 1,
+			}):Play()
+			task.delay(0.24, function()
+				state.hubBusy = false
+			end)
 			resumeTheme()
-		elseif theme.IsPlaying then
-			state.themeAt = theme.TimePosition
-			theme:Pause()
 		end
 	end
 	local opener = Instance.new("ImageButton")
@@ -5852,6 +6185,13 @@ corner(window, 12)
 	if theme.SoundId ~= "" then
 		task.defer(resumeTheme)
 	end
+	local hubScale = Instance.new("UIScale")
+	hubScale.Name = "HubScale"
+	hubScale.Scale = 0.92
+	hubScale.Parent = window
+	TweenService:Create(hubScale, TweenInfo.new(0.32, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+		Scale = 1,
+	}):Play()
 	state.applyLook()
 end)()
 local wash = Instance.new("UIGradient")
@@ -5986,7 +6326,12 @@ local function iconButton(text, x, callback)
 	button.AutoButtonColor = false
 	button.Parent = top
 	corner(button, 8)
-	button.MouseButton1Click:Connect(callback)
+	button.MouseButton1Click:Connect(function()
+		if state.pulse then
+			state.pulse(button)
+		end
+		callback()
+	end)
 	return button
 end
 
@@ -6071,6 +6416,9 @@ for index, name in ipairs(pages) do
 		end
 	end)
 	button.MouseButton1Click:Connect(function()
+		if state.pulse then
+			state.pulse(button)
+		end
 		state.page = name
 		renderPage()
 	end)
@@ -6161,6 +6509,53 @@ bind(UserInputService.InputChanged, function(input)
 end)
 
 bind(UserInputService.InputBegan, function(input, processed)
+	if state.captureBind and input.UserInputType == Enum.UserInputType.Keyboard then
+		local code = input.KeyCode
+		local name = code.Name
+		local blocked = {
+			Unknown = true,
+			W = true,
+			A = true,
+			S = true,
+			D = true,
+			Space = true,
+			LeftShift = true,
+			LeftControl = true,
+			T = true,
+			Q = true,
+			E = true,
+			F = true,
+			R = true,
+			X = true,
+			V = true,
+			RightShift = true,
+		}
+		if code == Enum.KeyCode.Escape then
+			pushLog("Keybind cancelled")
+		elseif code == Enum.KeyCode.Backspace then
+			state.binds[state.captureBind] = "None"
+			pushLog("Keybind cleared")
+			if state.savePrefs then
+				state.savePrefs()
+			end
+		elseif blocked[name] or Enum.KeyCode[name] == nil then
+			pushLog("That key stays free")
+		else
+			for slot, bound in pairs(state.binds) do
+				if slot ~= state.captureBind and bound == name then
+					state.binds[slot] = "None"
+				end
+			end
+			state.binds[state.captureBind] = name
+			pushLog("Bound " .. name)
+			if state.savePrefs then
+				state.savePrefs()
+			end
+		end
+		state.captureBind = nil
+		renderPage()
+		return
+	end
 	if input.KeyCode == Enum.KeyCode.RightShift and not processed then
 		if state.toggleHub then
 			state.toggleHub()
@@ -6172,6 +6567,20 @@ bind(UserInputService.InputBegan, function(input, processed)
 	end
 	if input.UserInputType == Enum.UserInputType.Keyboard then
 		held[input.KeyCode] = true
+		local keyName = input.KeyCode.Name
+		if keyName ~= "None" and keyName ~= "Unknown" and not UserInputService:GetFocusedTextBox() and state.binds then
+			if keyName == state.binds.fly and state.toggleFly then
+				state.toggleFly()
+			elseif keyName == state.binds.speed and state.toggleSpeed then
+				state.toggleSpeed()
+			elseif keyName == state.binds.mats and state.toggleMats then
+				state.toggleMats()
+			elseif keyName == state.binds.zone and state.toggleZone then
+				state.toggleZone()
+			elseif keyName == state.binds.shove and state.toggleShove then
+				state.toggleShove()
+			end
+		end
 	end
 	if state.clickTp and inPortal() and not processed and input.UserInputType == Enum.UserInputType.MouseButton1 then
 		local _, _, root = characterParts()
@@ -6214,6 +6623,7 @@ bind(RunService.Stepped, function()
 		or state.mechHeld
 		or state.portalCf
 		or materialHoldActive()
+		or state.shoveNear
 		or humanoid.SeatPart
 		or (state.followId and os.clock() < (state.portalUntil or 0))
 	local function clearWalkPush()
