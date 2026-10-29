@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.31
+-- BUILD 2026-10-29-1.6.32
 -- Place 75108253383447 · Universe 10767619742
 -- The picture button or RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.31"
+local BUILD = "2026-10-29-1.6.32"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -5504,12 +5504,32 @@ corner(window, 12)
 		portal.ScaleType = Enum.ScaleType.Crop
 		portal.ZIndex = 6
 		portal.Active = false
+		portal.ClipsDescendants = true
 		portal.Parent = window
 		corner(portal, 59)
 		local portalStroke = Instance.new("UIStroke")
 		portalStroke.Color = C.accent
 		portalStroke.Thickness = 2
 		portalStroke.Parent = portal
+		if toggleId then
+			local rick = Instance.new("ImageLabel")
+			rick.Name = "Rick"
+			rick.AnchorPoint = Vector2.new(0.5, 0.5)
+			rick.Position = UDim2.fromScale(0.5, 0.5)
+			rick.Size = UDim2.fromOffset(72, 72)
+			rick.BackgroundTransparency = 1
+			rick.BorderSizePixel = 0
+			rick.Image = toggleId
+			rick.ScaleType = Enum.ScaleType.Crop
+			rick.ZIndex = 7
+			rick.Active = false
+			rick.Parent = portal
+			corner(rick, 36)
+			local rickStroke = Instance.new("UIStroke")
+			rickStroke.Color = Color3.fromRGB(6, 14, 8)
+			rickStroke.Thickness = 2
+			rickStroke.Parent = rick
+		end
 	end
 	local theme = Instance.new("Sound")
 	theme.Name = "VOIDZ_Theme"
