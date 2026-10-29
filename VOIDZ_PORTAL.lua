@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.1.0
+-- BUILD 2026-10-29-1.2.0
 -- Place 75108253383447 · Universe 10767619742
 -- RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.1.0"
+local BUILD = "2026-10-29-1.2.0"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -87,6 +87,11 @@ local state = {
 	killRange = 500,
 	questRange = 400,
 	locking = false,
+	autoBuild = false,
+	buildKind = "Pad",
+	buildSize = 24,
+	buildReach = 16,
+	buildOrigin = nil,
 	fovOn = false,
 	fov = 90,
 	selected = nil,
@@ -555,6 +560,138 @@ local function restoreCharacter()
 	state.speedApplied = false
 end
 
+local BUILD_FOLDER = "VOIDZ_BUILD"
+
+local function clearBuild()
+	state.buildOrigin = nil
+	local folder = workspace:FindFirstChild(BUILD_FOLDER)
+	if folder then
+		folder:Destroy()
+	end
+end
+
+local function flatLook(root)
+	local look = root.CFrame.LookVector
+	local flat = Vector3.new(look.X, 0, look.Z)
+	if flat.Magnitude < 0.05 then
+		flat = Vector3.new(0, 0, -1)
+	end
+	return CFrame.lookAt(root.Position, root.Position + flat.Unit)
+end
+
+local function addBlock(folder, cf, size, color)
+	if #folder:GetChildren() >= 80 then
+		return nil
+	end
+	local part = Instance.new("Part")
+	part.Name = "VOIDZ_Block"
+	part.Anchored = true
+	part.CanCollide = true
+	part.CanQuery = true
+	part.CanTouch = true
+	part.CastShadow = false
+	part.Material = Enum.Material.SmoothPlastic
+	part.Color = color or Color3.fromRGB(78, 58, 132)
+	part.Size = size
+	part.CFrame = cf
+	part.TopSurface = Enum.SurfaceType.Smooth
+	part.BottomSurface = Enum.SurfaceType.Smooth
+	part.Parent = folder
+	return part
+end
+
+local function addWedge(folder, cf, size, color)
+	if #folder:GetChildren() >= 80 then
+		return nil
+	end
+	local part = Instance.new("WedgePart")
+	part.Name = "VOIDZ_Block"
+	part.Anchored = true
+	part.CanCollide = true
+	part.CanQuery = true
+	part.CanTouch = true
+	part.CastShadow = false
+	part.Material = Enum.Material.SmoothPlastic
+	part.Color = color or Color3.fromRGB(78, 58, 132)
+	part.Size = size
+	part.CFrame = cf
+	part.Parent = folder
+	return part
+end
+
+local function placeBuild(kind, root, quiet)
+	if not root then
+		local _, _, found = characterParts()
+		root = found
+	end
+	if not root then
+		if not quiet then
+			pushLog("No character to build from")
+		end
+		return
+	end
+	clearBuild()
+	local folder = Instance.new("Folder")
+	folder.Name = BUILD_FOLDER
+	folder.Parent = workspace
+	local base = flatLook(root)
+	local floorColor = Color3.fromRGB(78, 58, 132)
+	local wallColor = Color3.fromRGB(36, 28, 58)
+	local span = math.clamp(state.buildSize or 24, 12, 48)
+	state.buildKind = kind
+	state.buildOrigin = root.Position
+	state.buildReach = span
+	if kind == "Stairs" then
+		for step = 0, 9 do
+			addBlock(folder, base * CFrame.new(0, -2.5 + step * 1.2, -3 - step * 3), Vector3.new(10, 1, 3.2), floorColor)
+		end
+		state.buildReach = 34
+	elseif kind == "Wall" then
+		addBlock(folder, base * CFrame.new(0, 5, -14), Vector3.new(span, 16, 1.5), wallColor)
+		state.buildReach = 18
+	elseif kind == "Portal bay" then
+		local half = span * 0.5
+		addBlock(folder, base * CFrame.new(0, -3, 0), Vector3.new(span, 1, span), floorColor)
+		addBlock(folder, base * CFrame.new(0, 6, -(half + 2)), Vector3.new(span, 16, 1.5), wallColor)
+		addBlock(folder, base * CFrame.new(-half, 4, -4), Vector3.new(1.5, 12, 14), wallColor)
+		state.buildReach = half + 4
+		if not quiet then
+			sendKey(Enum.KeyCode.T, "Portal Gun")
+		end
+	elseif kind == "Bridge" then
+		for step = 0, 9 do
+			addBlock(folder, base * CFrame.new(0, -3, -6 - step * 8), Vector3.new(10, 1, 8), floorColor)
+		end
+		state.buildReach = 88
+	elseif kind == "Room" then
+		local half = span * 0.5
+		addBlock(folder, base * CFrame.new(0, -3, 0), Vector3.new(span, 1, span), floorColor)
+		addBlock(folder, base * CFrame.new(0, 5, -half), Vector3.new(span, 12, 1), wallColor)
+		addBlock(folder, base * CFrame.new(-half, 5, 0), Vector3.new(1, 12, span), wallColor)
+		addBlock(folder, base * CFrame.new(half, 5, 0), Vector3.new(1, 12, span), wallColor)
+		addBlock(folder, base * CFrame.new(0, 11, 0), Vector3.new(span, 1, span), floorColor)
+		state.buildReach = half
+	elseif kind == "Ramp" then
+		addWedge(folder, base * CFrame.new(0, 1, -16) * CFrame.Angles(0, math.pi, 0), Vector3.new(14, 8, 28), floorColor)
+		state.buildReach = 32
+	elseif kind == "Tower" then
+		for level = 0, 4 do
+			addBlock(folder, base * CFrame.new(0, -3 + level * 8, 0), Vector3.new(16, 1, 16), floorColor)
+		end
+		for step = 0, 10 do
+			addBlock(folder, base * CFrame.new(0, -1 + step * 3.2, -10), Vector3.new(5, 1, 3), floorColor)
+		end
+		state.buildReach = 16
+	else
+		addBlock(folder, base * CFrame.new(0, -3, 0), Vector3.new(span, 1, span), floorColor)
+		state.buildKind = "Pad"
+		state.buildReach = span * 0.5
+	end
+	if not quiet then
+		pushLog("Built " .. state.buildKind .. " (" .. tostring(#folder:GetChildren()) .. " parts)")
+	end
+end
+
 local function revertFeatures()
 	state.fly = false
 	state.noclip = false
@@ -568,6 +705,7 @@ local function revertFeatures()
 	state.autoKill = false
 	state.autoFarm = false
 	state.autoQuest = false
+	state.autoBuild = false
 	state.locking = false
 	state.fovOn = false
 	table.clear(held)
@@ -577,6 +715,7 @@ local function revertFeatures()
 	stopSpectate()
 	restoreCharacter()
 	sweepHubObjects()
+	clearBuild()
 end
 
 local function stopAll()
@@ -944,6 +1083,17 @@ local function onHeartbeat()
 		end
 	end
 	runCombat(root)
+	if state.autoBuild and inPortal() and not state.locking then
+		local now = os.clock()
+		if now >= (state.nextBuild or 0) then
+			state.nextBuild = now + 0.5
+			local origin = state.buildOrigin
+			local reach = state.buildReach or 16
+			if not origin or (root.Position - origin).Magnitude > reach + 8 then
+				placeBuild(state.buildKind or "Pad", root, true)
+			end
+		end
+	end
 end
 
 local function bind(signal, fn)
@@ -1241,7 +1391,7 @@ function renderPage()
 	if state.page == "Home" then
 		local where = inPortal() and "Portal Sandbox is loaded." or "This place is not Portal Sandbox. Join the game, then execute again."
 		note(centerHolder, where .. " PlaceId " .. tostring(game.PlaceId) .. ". Build " .. BUILD .. ".", nextOrder())
-		note(centerHolder, "RightShift hides the hub. PvP and Farm run the combat loops. Pick a player on the right for a single target.", nextOrder())
+		note(centerHolder, "RightShift hides the hub. PvP and Farm run the combat loops. Build places floors, walls, stairs, and a portal bay. Pick a player on the right for a single target.", nextOrder())
 		for _, line in ipairs(logs) do
 			local row = Instance.new("TextLabel")
 			row.BackgroundColor3 = C.card
@@ -1407,6 +1557,67 @@ function renderPage()
 			renderPage()
 		end, function()
 			state.questRange = math.min(2000, state.questRange + 50)
+			renderPage()
+		end)
+		return
+	end
+
+	if state.page == "Build" then
+		note(centerHolder, "Builds a structure at your feet. Portal bay is a floor plus a wall, then selects the portal gun so you can place a portal on that wall. Auto rebuild moves the same structure when you walk past it. Unload removes the parts.", nextOrder())
+		local function buildNow(kind)
+			if not requireGame() then
+				return
+			end
+			local _, _, root = characterParts()
+			placeBuild(kind, root, false)
+		end
+		actionButton(centerHolder, "Pad", nextOrder(), function()
+			buildNow("Pad")
+		end)
+		actionButton(centerHolder, "Stairs", nextOrder(), function()
+			buildNow("Stairs")
+		end)
+		actionButton(centerHolder, "Wall", nextOrder(), function()
+			buildNow("Wall")
+		end)
+		actionButton(centerHolder, "Portal bay", nextOrder(), function()
+			buildNow("Portal bay")
+		end)
+		actionButton(centerHolder, "Bridge", nextOrder(), function()
+			buildNow("Bridge")
+		end)
+		actionButton(centerHolder, "Room", nextOrder(), function()
+			buildNow("Room")
+		end)
+		actionButton(centerHolder, "Ramp", nextOrder(), function()
+			buildNow("Ramp")
+		end)
+		actionButton(centerHolder, "Tower", nextOrder(), function()
+			buildNow("Tower")
+		end)
+		stepRow(centerHolder, "Size", nextOrder(), tostring(state.buildSize), function()
+			state.buildSize = math.max(12, state.buildSize - 4)
+			renderPage()
+		end, function()
+			state.buildSize = math.min(48, state.buildSize + 4)
+			renderPage()
+		end)
+		toggleRow(centerHolder, "Auto rebuild", nextOrder(), state.autoBuild, function()
+			if not state.autoBuild and not requireGame() then
+				return
+			end
+			state.autoBuild = not state.autoBuild
+			if state.autoBuild then
+				local _, _, root = characterParts()
+				placeBuild(state.buildKind or "Pad", root, false)
+			end
+			pushLog(state.autoBuild and "Auto rebuild on" or "Auto rebuild off")
+			renderPage()
+		end)
+		actionButton(centerHolder, "Clear build", nextOrder(), function()
+			clearBuild()
+			state.autoBuild = false
+			pushLog("Build cleared")
 			renderPage()
 		end)
 		return
@@ -1584,7 +1795,7 @@ function renderPage()
 	end
 
 	if state.page == "Settings" then
-		note(centerHolder, "Unload script turns off fly, noclip, speed, infinite jump, click teleport, anti-void, auto regenerate, auto kill, auto farm, and auto quest. It removes ESP, fullbright, and the field-of-view change, puts your camera and character back, and deletes this window.", nextOrder())
+		note(centerHolder, "Unload script turns off fly, noclip, speed, infinite jump, click teleport, anti-void, auto regenerate, auto kill, auto farm, auto quest, and auto rebuild. It removes ESP, fullbright, the field-of-view change, and built parts, puts your camera and character back, and deletes this window.", nextOrder())
 		note(centerHolder, "Build " .. BUILD .. ". RightShift hides the hub. The chat bar stays available.", nextOrder())
 		actionButton(centerHolder, "Unload script", nextOrder(), function()
 			if type(ENV.VOIDZ_PORTAL_STOP) == "function" then
@@ -1798,24 +2009,29 @@ side.BackgroundTransparency = 0.3
 side.BorderSizePixel = 0
 side.Parent = body
 
-local sideList = Instance.new("Frame")
+local sideList = Instance.new("ScrollingFrame")
 sideList.BackgroundTransparency = 1
-sideList.Position = UDim2.fromOffset(8, 10)
-sideList.Size = UDim2.new(1, -16, 1, -20)
+sideList.BorderSizePixel = 0
+sideList.Position = UDim2.fromOffset(8, 8)
+sideList.Size = UDim2.new(1, -12, 1, -16)
+sideList.ScrollBarThickness = 3
+sideList.ScrollBarImageColor3 = C.accent
+sideList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+sideList.CanvasSize = UDim2.new()
 sideList.Parent = side
 local sideLayout = Instance.new("UIListLayout")
-sideLayout.Padding = UDim.new(0, 6)
+sideLayout.Padding = UDim.new(0, 4)
 sideLayout.SortOrder = Enum.SortOrder.LayoutOrder
 sideLayout.Parent = sideList
 
-local pages = { "Home", "Move", "PvP", "Farm", "Portals", "Tools", "Visuals", "Players", "Settings" }
+local pages = { "Home", "Move", "PvP", "Farm", "Build", "Portals", "Tools", "Visuals", "Players", "Settings" }
 for index, name in ipairs(pages) do
 	local button = Instance.new("TextButton")
-	button.Size = UDim2.new(1, 0, 0, 36)
+	button.Size = UDim2.new(1, 0, 0, 30)
 	button.BackgroundColor3 = C.side
 	button.AutoButtonColor = false
 	button.Font = Enum.Font.GothamMedium
-	button.TextSize = 14
+	button.TextSize = 13
 	button.TextColor3 = C.text
 	button.TextXAlignment = Enum.TextXAlignment.Left
 	button.Text = "   " .. name
