@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.4.0
+-- BUILD 2026-10-29-1.5.0
 -- Place 75108253383447 · Universe 10767619742
 -- RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.4.0"
+local BUILD = "2026-10-29-1.5.0"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -87,6 +87,8 @@ local state = {
 	iqSource = "",
 	iqLast = nil,
 	iqTried = {},
+	extraCodes = "",
+	redeeming = false,
 	questAny = false,
 	killSelected = false,
 	skipTeam = true,
@@ -1098,19 +1100,21 @@ local function nearestNpc(origin)
 			bestName = model.Name
 		end
 	end
-	for _, inst in ipairs(workspace:GetChildren()) do
-		consider(inst)
-		if inst:IsA("Folder") or inst:IsA("Model") then
-			for _, child in ipairs(inst:GetChildren()) do
-				consider(child)
-				if child:IsA("Folder") or child:IsA("Model") then
-					for _, nested in ipairs(child:GetChildren()) do
-						consider(nested)
-					end
-				end
+	local function walk(folder, depth)
+		if depth > 5 or seen > 800 then
+			return
+		end
+		for _, child in ipairs(folder:GetChildren()) do
+			consider(child)
+			if seen > 800 then
+				return
+			end
+			if (child:IsA("Folder") or child:IsA("Model")) and child.Name ~= BUILD_FOLDER then
+				walk(child, depth + 1)
 			end
 		end
 	end
+	walk(workspace, 0)
 	npcCache.time = now
 	npcCache.part = bestPart
 	npcCache.name = bestName
@@ -1529,6 +1533,34 @@ local function pressIqButton()
 	return nil
 end
 
+local function closestClaim(origin)
+	local best = nil
+	local bestPos = nil
+	local bestDist = 220
+	local seen = 0
+	for _, inst in ipairs(workspace:GetDescendants()) do
+		seen = seen + 1
+		if seen > 1800 then
+			break
+		end
+		if inst:IsA("ProximityPrompt") and inst.Enabled then
+			local blob = string.lower(inst.Name .. " " .. inst.ActionText .. " " .. inst.ObjectText)
+			if string.find(blob, "claim", 1, true) or string.find(blob, "collect", 1, true) or string.find(blob, "pickup", 1, true) then
+				local pos = promptPosition(inst)
+				if pos then
+					local dist = (pos - origin).Magnitude
+					if dist < bestDist then
+						bestDist = dist
+						best = inst
+						bestPos = pos
+					end
+				end
+			end
+		end
+	end
+	return best, bestPos
+end
+
 local function runIq(root)
 	if not state.autoIq or not inPortal() then
 		state.iqBusy = false
@@ -1557,6 +1589,21 @@ local function runIq(root)
 			pushLog("IQ object " .. tostring(label))
 		end
 		return
+	end
+	local nearNpc = nearestNpc(root.Position)
+	if not (nearNpc and (nearNpc.Position - root.Position).Magnitude < 28) then
+		local prompt, pos = closestClaim(root.Position)
+		if prompt and pos then
+			state.iqBusy = true
+			state.locking = true
+			useIqTarget(prompt, root, pos)
+			local label = prompt.ObjectText ~= "" and prompt.ObjectText or prompt.Name
+			if state.lastIqTarget ~= label then
+				state.lastIqTarget = label
+				pushLog("Claim " .. tostring(label))
+			end
+			return
+		end
 	end
 	state.iqBusy = false
 	if now >= (state.nextIqClick or 0) then
@@ -1603,17 +1650,24 @@ local function runCombat(root)
 	state.nextHit = now + 0.32
 	local part = nil
 	local label = nil
-	if state.autoKill or (state.autoFarm and state.farmPlayers) or iqGrind then
-		part, label = nearestPlayer(root.Position)
-	end
-	if not part and state.autoFarm then
+	if iqGrind and not state.autoKill and not state.autoFarm then
 		part, label = nearestNpc(root.Position)
+		if not part and state.iqKills then
+			part, label = nearestPlayer(root.Position)
+		end
+	else
+		if state.autoKill or (state.autoFarm and state.farmPlayers) then
+			part, label = nearestPlayer(root.Position)
+		end
+		if not part and state.autoFarm then
+			part, label = nearestNpc(root.Position)
+		end
 	end
 	if not part then
 		state.locking = false
 		if iqGrind and now > (state.nextIqNote or 0) then
 			state.nextIqNote = now + 6
-			pushLog("IQ " .. state.iqText .. ". No player in range")
+			pushLog("IQ " .. state.iqText .. ". No creature or player in range")
 		end
 		return
 	end
@@ -1750,6 +1804,226 @@ local function makeScroll(parent)
 	pad.PaddingRight = UDim.new(0, 6)
 	pad.Parent = scroll
 	return scroll
+end
+
+local function looksLikeCode(text)
+	if type(text) ~= "string" then
+		return false
+	end
+	text = string.gsub(text, "^%s+", "")
+	text = string.gsub(text, "%s+$", "")
+	if #text < 3 or #text > 24 then
+		return false
+	end
+	if not string.match(text, "^[%w_%-]+$") then
+		return false
+	end
+	local lower = string.lower(text)
+	local banned = {
+		gear = true,
+		codes = true,
+		code = true,
+		shop = true,
+		claim = true,
+		redeem = true,
+		vip = true,
+		gun = true,
+		guns = true,
+		vehicles = true,
+		gamepasses = true,
+		custom = true,
+		portal = true,
+		close = true,
+		enter = true,
+		submit = true,
+		text = true,
+		button = true,
+		frame = true,
+	}
+	return banned[lower] ~= true
+end
+
+local function clickGui(button)
+	if type(firesignal) == "function" then
+		pcall(firesignal, button.MouseButton1Click)
+		pcall(firesignal, button.Activated)
+	end
+	local size = button.AbsoluteSize
+	if size.X < 2 or size.Y < 2 then
+		return
+	end
+	local pos = button.AbsolutePosition
+	local x = pos.X + size.X * 0.5
+	local y = pos.Y + size.Y * 0.5
+	pcall(function()
+		VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 0)
+	end)
+	task.wait(0.05)
+	pcall(function()
+		VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
+	end)
+end
+
+local function guiBlob(inst)
+	local text = ""
+	if inst:IsA("TextButton") or inst:IsA("TextLabel") or inst:IsA("TextBox") then
+		text = inst.Text
+	end
+	local placeholder = ""
+	if inst:IsA("TextBox") then
+		placeholder = inst.PlaceholderText
+	end
+	return string.lower(inst.Name .. " " .. text .. " " .. placeholder .. " " .. (inst.Parent and inst.Parent.Name or ""))
+end
+
+local function paidBlob(blob)
+	return string.find(blob, "robux", 1, true)
+		or string.find(blob, "buy", 1, true)
+		or string.find(blob, "purchase", 1, true)
+		or string.find(blob, "gamepass", 1, true)
+		or string.find(blob, "vip", 1, true)
+end
+
+local function nearCode(inst)
+	local current = inst
+	for _ = 1, 5 do
+		if not current then
+			return false
+		end
+		if string.find(string.lower(current.Name), "code", 1, true) then
+			return true
+		end
+		current = current.Parent
+	end
+	return false
+end
+
+local function redeemAll()
+	if state.redeeming then
+		pushLog("Already redeeming")
+		return
+	end
+	if not requireGame() then
+		return
+	end
+	state.redeeming = true
+	task.spawn(function()
+		local found = {}
+		local function add(text)
+			if not looksLikeCode(text) then
+				return
+			end
+			local key = string.lower(text)
+			if not found[key] then
+				found[key] = text
+			end
+		end
+		for piece in string.gmatch(state.extraCodes or "", "[^,%s]+") do
+			add(piece)
+		end
+		pcall(function()
+			local replicated = game:GetService("ReplicatedStorage")
+			local function harvest(inst, depth)
+				if depth > 2 then
+					return
+				end
+				if inst:IsA("StringValue") then
+					add(inst.Value)
+					if string.find(string.lower(inst.Parent and inst.Parent.Name or ""), "code", 1, true) then
+						add(inst.Name)
+					end
+				end
+				if string.find(string.lower(inst.Name), "code", 1, true) then
+					for _, child in ipairs(inst:GetChildren()) do
+						harvest(child, depth + 1)
+					end
+				end
+			end
+			for _, child in ipairs(replicated:GetChildren()) do
+				harvest(child, 0)
+			end
+		end)
+		local seen = 0
+		local codesTab = nil
+		local codeBox = nil
+		local redeemButton = nil
+		local claims = {}
+		for _, inst in ipairs(PlayerGui:GetDescendants()) do
+			seen = seen + 1
+			if seen > 1200 then
+				break
+			end
+			if gui and inst:IsDescendantOf(gui) then
+				continue
+			end
+			local blob = guiBlob(inst)
+			if paidBlob(blob) then
+				continue
+			end
+			if (inst:IsA("TextButton") or inst:IsA("ImageButton")) and inst.Visible and nearCode(inst) then
+				if not codesTab and string.find(blob, "codes", 1, true) and not string.find(blob, "barcode", 1, true) then
+					codesTab = inst
+				end
+				if string.find(blob, "redeem", 1, true) or string.find(blob, "claim", 1, true) or string.find(blob, "submit", 1, true) then
+					if not redeemButton and string.find(blob, "redeem", 1, true) then
+						redeemButton = inst
+					else
+						table.insert(claims, inst)
+					end
+				end
+			elseif inst:IsA("TextBox") and nearCode(inst) then
+				codeBox = inst
+			elseif inst:IsA("TextLabel") and nearCode(inst) then
+				add(inst.Text)
+			end
+		end
+		if codesTab then
+			clickGui(codesTab)
+			pushLog("Opened Codes tab")
+			task.wait(0.35)
+		end
+		local list = {}
+		for _, text in pairs(found) do
+			table.insert(list, text)
+		end
+		table.sort(list)
+		local used = 0
+		if codeBox and #list > 0 then
+			for _, text in ipairs(list) do
+				if not state.alive then
+					break
+				end
+				codeBox.Text = text
+				pcall(function()
+					codeBox:CaptureFocus()
+					codeBox:ReleaseFocus(true)
+				end)
+				if redeemButton then
+					clickGui(redeemButton)
+				end
+				used = used + 1
+				pushLog("Redeem " .. text)
+				task.wait(0.55)
+			end
+		end
+		local clicked = 0
+		for _, button in ipairs(claims) do
+			if not state.alive or clicked >= 12 then
+				break
+			end
+			if button.Parent then
+				clickGui(button)
+				clicked = clicked + 1
+				task.wait(0.45)
+			end
+		end
+		state.redeeming = false
+		if used == 0 and clicked == 0 then
+			pushLog("No code string on screen. Paste codes, then redeem again")
+		else
+			pushLog("Redeem pass done · " .. tostring(used) .. " typed · " .. tostring(clicked) .. " claim buttons")
+		end
+	end)
 end
 
 local function note(parent, text, order)
@@ -2210,7 +2484,7 @@ function renderPage()
 			iqLine = iqLine .. "  ·  " .. state.iqSource
 		end
 		note(centerHolder, iqLine, nextOrder())
-		note(centerHolder, "VIP lists 2x IQ XP next to 2x kill money. Public pages never say which action grants IQ, and this hub does not call a guessed remote. Auto IQ reads leaderstats, attributes, and the HUD. If the map has an IQ prompt or pickup, it teleports there and uses it. Grind nearest player is the kill loop, because kills are the only payout the game describes.", nextOrder())
+		note(centerHolder, "The Oct 28 guide shows 87 dimensions, a ship that teleports, creatures you shoot with the portal gun, claims, a crafting table, and a shop Codes tab. It never shows an IQ formula. Auto IQ reads your stat, uses an IQ pickup if one exists, claims a nearby prompt, then shoots the nearest living creature. Grind nearest player is only the backup.", nextOrder())
 		toggleRow(centerHolder, "Auto IQ", nextOrder(), state.autoIq, function()
 			if not state.autoIq and not requireGame() then
 				return
@@ -2270,6 +2544,36 @@ function renderPage()
 		end, function()
 			state.questRange = math.min(2000, state.questRange + 50)
 			renderPage()
+		end)
+		return
+	end
+
+	if state.page == "Codes" then
+		note(centerHolder, "The shop in the Oct 28 guide has a Codes tab. That video never shows a code string, and a comment on it says the codes were not shown. Redeem all opens that tab, types any codes you paste, and presses claim buttons that are not Robux purchases. It does not call a guessed remote.", nextOrder())
+		local box = Instance.new("TextBox")
+		box.Size = UDim2.new(1, 0, 0, 34)
+		box.BackgroundColor3 = C.card
+		box.BorderSizePixel = 0
+		box.ClearTextOnFocus = false
+		box.Font = Enum.Font.Gotham
+		box.PlaceholderColor3 = C.muted
+		box.PlaceholderText = "Paste codes, separated by spaces"
+		box.Text = state.extraCodes or ""
+		box.TextColor3 = C.text
+		box.TextSize = 14
+		box.TextXAlignment = Enum.TextXAlignment.Left
+		box.LayoutOrder = nextOrder()
+		box.Parent = centerHolder
+		corner(box, 6)
+		local inset = Instance.new("UIPadding")
+		inset.PaddingLeft = UDim.new(0, 8)
+		inset.Parent = box
+		box.FocusLost:Connect(function()
+			state.extraCodes = box.Text
+		end)
+		actionButton(centerHolder, "Redeem all", nextOrder(), function()
+			state.extraCodes = box.Text
+			redeemAll()
 		end)
 		return
 	end
@@ -2736,7 +3040,7 @@ sideLayout.Padding = UDim.new(0, 4)
 sideLayout.SortOrder = Enum.SortOrder.LayoutOrder
 sideLayout.Parent = sideList
 
-local pages = { "Home", "Move", "Materials", "PvP", "Farm", "Build", "Portals", "Tools", "Visuals", "Players", "Settings" }
+local pages = { "Home", "Move", "Materials", "PvP", "Farm", "Codes", "Build", "Portals", "Tools", "Visuals", "Players", "Settings" }
 for index, name in ipairs(pages) do
 	local button = Instance.new("TextButton")
 	button.Size = UDim2.new(1, 0, 0, 30)

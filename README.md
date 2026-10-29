@@ -4,7 +4,7 @@
 loadstring(game:HttpGet("https://raw.githubusercontent.com/fungamer1234/voidz-portal/main/VOIDZ_PORTAL.lua", true))()
 ```
 
-Build `2026-10-29-1.4.0`
+Build `2026-10-29-1.5.0`
 
 Game: [Portal Sandbox](https://www.roblox.com/games/75108253383447/Portal-Sandbox). PlaceId `75108253383447`.
 
@@ -27,7 +27,8 @@ A copy of the same file is at `Documents/MacsploitUI/scripts/VOIDZ_PORTAL.lua` i
 - Player list with teleport and spectate.
 - PvP auto kill teleports behind a living player, aims, equips a knife, laser, or mech you already have, and clicks.
 - Materials scans the map and lists every material and loose item name it finds. Auto collect teleports to the closest selected one, fires its prompt or touch, pulls it onto you, then goes to the next closest.
-- Farm → Auto IQ reads an IQ, brain, or intellect value from leaderstats, player attributes, or the HUD and logs it when the number changes. If the map has an IQ prompt or pickup, it teleports there and uses the prompt or touch. It does not call a guessed remote. Grind nearest player uses the same kill teleport, because the only published payout is kill money and VIP's 2x IQ XP sits next to that. It skips buy, shop, and VIP buttons.
+- Farm → Auto IQ reads an IQ, brain, or intellect value from leaderstats, player attributes, or the HUD. It uses an IQ pickup when the map has one, fires a nearby claim, collect, or pickup prompt, then shoots the nearest living creature. Grind nearest player is the backup. It does not call a guessed remote.
+- Codes → Redeem all opens the in-game Codes tab, types codes you paste, and presses claim buttons that are not Robux purchases. The Oct 28 guide shows that tab and does not show a code string.
 - Build places a pad, stairs, wall, portal bay, bridge, room, ramp, or tower at your feet. Portal bay also selects the portal gun. Auto rebuild moves that structure when you walk past it. Unload deletes the parts.
 - The window opens with a moving purple gradient, a light sweep across the top bar, and short tab and button animations.
 - Settings has Unload script. It turns off every feature the hub enabled, restores your character, camera, lighting, and field of view, and removes the window.
