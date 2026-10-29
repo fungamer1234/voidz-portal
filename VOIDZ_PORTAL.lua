@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.0
+-- BUILD 2026-10-29-1.6.1
 -- Place 75108253383447 · Universe 10767619742
 -- RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.0"
+local BUILD = "2026-10-29-1.6.1"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -948,63 +948,6 @@ local function forcePickup(part, root)
 	end)
 end
 
-local function runMaterials(root)
-	local scraping = state.autoMat or (state.autoQuest and state.questCollect)
-	if not scraping or not inPortal() or state.autoIq then
-		if not state.autoIq then
-			state.iqBusy = false
-		end
-		return
-	end
-	if state.autoKill or (state.autoQuest and (state.questKillPlayers or state.questKillNpc)) then
-		state.iqBusy = false
-		return
-	end
-	local now = os.clock()
-	if now < (state.nextMat or 0) then
-		if state.iqBusy then
-			state.locking = true
-		end
-		return
-	end
-	state.nextMat = now + 0.85
-	local inst, pos, label = findIqWorld(root.Position)
-	if inst and pos then
-		state.iqBusy = true
-		state.locking = true
-		useIqTarget(inst, root, pos)
-		if state.lastIqTarget ~= label then
-			state.lastIqTarget = label
-			pushLog("Scrap " .. tostring(label))
-		end
-		return
-	end
-	local nearNpc = nearestNpc(root.Position)
-	if not (nearNpc and (nearNpc.Position - root.Position).Magnitude < 28) then
-		local prompt, claimPos = closestClaim(root.Position)
-		if prompt and claimPos then
-			state.iqBusy = true
-			state.locking = true
-			useIqTarget(prompt, root, claimPos)
-			local claimLabel = prompt.ObjectText ~= "" and prompt.ObjectText or prompt.Name
-			if state.lastIqTarget ~= claimLabel then
-				state.lastIqTarget = claimLabel
-				pushLog("Claim " .. tostring(claimLabel))
-			end
-			return
-		end
-	end
-	state.iqBusy = false
-	if now >= (state.nextIqClick or 0) then
-		state.nextIqClick = now + 3
-		local button = pressIqButton()
-		if button and state.lastIqButton ~= button then
-			state.lastIqButton = button
-			pushLog("Scrap button " .. button)
-		end
-	end
-end
-
 local function revertFeatures()
 	state.fly = false
 	state.noclip = false
@@ -1023,7 +966,14 @@ local function revertFeatures()
 	state.autoBuild = false
 	state.autoMat = false
 	state.locking = false
+	state.killPart = nil
+	state.iqBusy = false
 	state.fovOn = false
+	local camera = workspace.CurrentCamera
+	if camera and state.savedCamType ~= nil then
+		camera.CameraType = state.savedCamType
+		state.savedCamType = nil
+	end
 	table.clear(held)
 	clearEsp()
 	setFullbright(false)
@@ -1056,9 +1006,6 @@ local function livingRoot(model)
 	end
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	if not humanoid or humanoid.Health <= 0 then
-		return nil
-	end
-	if model:FindFirstChildOfClass("ForceField") then
 		return nil
 	end
 	return model:FindFirstChild("HumanoidRootPart") or model:FindFirstChildWhichIsA("BasePart")
@@ -1150,26 +1097,37 @@ local function ensureWeapon()
 	if character then
 		for _, child in ipairs(character:GetChildren()) do
 			if child:IsA("Tool") then
-				local name = string.lower(child.Name)
-				if string.find(name, "knife", 1, true) or string.find(name, "laser", 1, true) or string.find(name, "mech", 1, true) or string.find(name, "blaster", 1, true) or string.find(name, "robo", 1, true) then
-					return
-				end
+				return child
 			end
 		end
 	end
-	local tool = findTool({ "knife", "laser", "mech", "blaster", "robo" })
+	local tool = findTool({ "portal", "blaster", "mech", "laser", "gun", "pistol", "knife", "robo" })
 	local _, humanoid = characterParts()
 	if tool and humanoid then
 		pcall(function()
 			humanoid:EquipTool(tool)
 		end)
+		return tool
 	end
+	return nil
 end
 
 local function clickAttack()
-	if type(mouse1click) == "function" then
+	local tool = ensureWeapon()
+	if tool then
+		pcall(function()
+			tool:Activate()
+		end)
+	end
+	if type(mouse1press) == "function" then
+		pcall(mouse1press)
+		task.delay(0.05, function()
+			if state.alive and type(mouse1release) == "function" then
+				pcall(mouse1release)
+			end
+		end)
+	elseif type(mouse1click) == "function" then
 		pcall(mouse1click)
-		return
 	end
 	local camera = workspace.CurrentCamera
 	local viewport = camera and camera.ViewportSize or Vector2.new(960, 540)
@@ -1196,7 +1154,7 @@ local function placeBehind(root, part)
 	else
 		flat = flat.Unit
 	end
-	local pos = part.Position - flat * 6 + Vector3.new(0, 2, 0)
+	local pos = part.Position - flat * 9 + Vector3.new(0, 2, 0)
 	local aim = part.Position + Vector3.new(0, 1.5, 0)
 	root.CFrame = CFrame.lookAt(pos, aim)
 	pcall(function()
@@ -1302,9 +1260,17 @@ local function scanQuestText()
 			or string.find(lower, "collect", 1, true)
 			or string.find(lower, "scrap", 1, true)
 			or string.find(lower, "gather", 1, true)
+		local targeted = string.find(lower, "player", 1, true)
+			or string.find(lower, "pvp", 1, true)
+			or string.find(lower, "creature", 1, true)
+			or string.find(lower, "npc", 1, true)
+			or string.find(lower, "monster", 1, true)
+			or string.find(lower, "scrap", 1, true)
+			or string.find(lower, "material", 1, true)
+			or string.find(lower, "bot", 1, true)
 		if named and #text > #bestNamed then
 			bestNamed = text
-		elseif objective and #text >= 8 and (bestLoose == "" or #text < #bestLoose) then
+		elseif objective and targeted and #text >= 8 and (bestLoose == "" or #text < #bestLoose) then
 			bestLoose = text
 		end
 	end
@@ -1562,17 +1528,19 @@ end
 
 local function findIqWorld(origin)
 	local now = os.clock()
-	if now - iqWorld.at < 2 and iqWorld.inst and iqWorld.inst.Parent and iqWorld.pos then
-		return iqWorld.inst, iqWorld.pos, iqWorld.label
+	if now - iqWorld.at < 2 then
+		if not iqWorld.inst or (iqWorld.inst.Parent and iqWorld.pos) then
+			return iqWorld.inst, iqWorld.pos, iqWorld.label
+		end
 	end
 	local best = nil
 	local bestPos = nil
 	local bestLabel = nil
-	local bestDist = 1200
+	local bestDist = math.huge
 	local seen = 0
 	for _, inst in ipairs(workspace:GetDescendants()) do
 		seen = seen + 1
-		if seen > 2200 then
+		if seen > 6000 then
 			break
 		end
 		if inst:IsDescendantOf(workspace) and not ownedByPlayer(inst) then
@@ -1675,11 +1643,11 @@ end
 local function closestClaim(origin)
 	local best = nil
 	local bestPos = nil
-	local bestDist = 220
+	local bestDist = math.huge
 	local seen = 0
 	for _, inst in ipairs(workspace:GetDescendants()) do
 		seen = seen + 1
-		if seen > 1800 then
+		if seen > 6000 then
 			break
 		end
 		if inst:IsA("ProximityPrompt") and inst.Enabled then
@@ -1700,7 +1668,134 @@ local function closestClaim(origin)
 	return best, bestPos
 end
 
-local iqSeat = { at = 0, seat = nil }
+local scrapCache = { at = 0, inst = nil, pos = nil, label = nil }
+
+local function hasWord(blob, word)
+	return string.match(blob, "^" .. word .. "$")
+		or string.match(blob, "^" .. word .. "[^%a]")
+		or string.match(blob, "[^%a]" .. word .. "$")
+		or string.match(blob, "[^%a]" .. word .. "[^%a]")
+end
+
+local function isScrapName(blob)
+	return hasWord(blob, "scrap")
+		or hasWord(blob, "metal")
+		or hasWord(blob, "iron")
+		or hasWord(blob, "steel")
+		or hasWord(blob, "junk")
+end
+
+local function closestScrap(origin)
+	local now = os.clock()
+	if now - scrapCache.at < 1.5 then
+		if not scrapCache.inst or (scrapCache.inst.Parent and scrapCache.pos) then
+			return scrapCache.inst, scrapCache.pos, scrapCache.label
+		end
+	end
+	local best = nil
+	local bestPos = nil
+	local bestLabel = nil
+	local bestDist = math.huge
+	local seen = 0
+	for _, inst in ipairs(workspace:GetDescendants()) do
+		seen = seen + 1
+		if seen > 6000 then
+			break
+		end
+		if not ownedByPlayer(inst) and not inst:FindFirstAncestor(BUILD_FOLDER) then
+			local pos = nil
+			local label = nil
+			if inst:IsA("ProximityPrompt") and inst.Enabled then
+				local blob = string.lower(inst.Name .. " " .. inst.ActionText .. " " .. inst.ObjectText)
+				if isScrapName(blob) then
+					pos = promptPosition(inst)
+					label = inst.ObjectText ~= "" and inst.ObjectText or inst.Name
+				end
+			elseif inst:IsA("BasePart") or inst:IsA("Model") or inst:IsA("ClickDetector") then
+				local blob = string.lower(inst.Name)
+				if inst:IsA("ClickDetector") and inst.Parent then
+					blob = blob .. " " .. string.lower(inst.Parent.Name)
+				end
+				if isScrapName(blob) then
+					pos = iqPoint(inst)
+					label = inst.Name
+					if inst:IsA("BasePart") then
+						local size = inst.Size
+						if size.X > 30 or size.Y > 30 or size.Z > 30 then
+							pos = nil
+						end
+					end
+				end
+			end
+			if pos then
+				local dist = (pos - origin).Magnitude
+				if dist < bestDist then
+					bestDist = dist
+					best = inst
+					bestPos = pos
+					bestLabel = label
+				end
+			end
+		end
+	end
+	scrapCache.at = now
+	scrapCache.inst = best
+	scrapCache.pos = bestPos
+	scrapCache.label = bestLabel
+	return best, bestPos, bestLabel
+end
+
+local function runMaterials(root)
+	local scraping = state.autoMat or (state.autoQuest and state.questCollect)
+	if state.iqBusy or not scraping or not inPortal() then
+		return
+	end
+	if state.autoKill or (state.autoQuest and (state.questKillPlayers or state.questKillNpc)) then
+		return
+	end
+	local now = os.clock()
+	if now < (state.nextMat or 0) then
+		return
+	end
+	state.nextMat = now + 0.85
+	local inst, pos, label = findIqWorld(root.Position)
+	if not inst then
+		inst, pos, label = closestScrap(root.Position)
+	end
+	if inst and pos then
+		state.locking = true
+		useIqTarget(inst, root, pos)
+		if state.lastIqTarget ~= label then
+			state.lastIqTarget = label
+			pushLog("Scrap " .. tostring(label))
+		end
+		return
+	end
+	local nearNpc = nearestNpc(root.Position)
+	if not (nearNpc and (nearNpc.Position - root.Position).Magnitude < 28) then
+		local prompt, claimPos = closestClaim(root.Position)
+		if prompt and claimPos then
+			state.locking = true
+			useIqTarget(prompt, root, claimPos)
+			local claimLabel = prompt.ObjectText ~= "" and prompt.ObjectText or prompt.Name
+			if state.lastIqTarget ~= claimLabel then
+				state.lastIqTarget = claimLabel
+				pushLog("Claim " .. tostring(claimLabel))
+			end
+			return
+		end
+	end
+	if now >= (state.nextIqClick or 0) then
+		state.nextIqClick = now + 3
+		local button = pressIqButton()
+		if button and state.lastIqButton ~= button then
+			state.lastIqButton = button
+			pushLog("Scrap button " .. button)
+		end
+	end
+end
+
+local iqSeat = { at = 0, seat = nil, names = "" }
 
 local function seatMentionsIq(seat)
 	if mentionsIq(seat.Name) then
@@ -1714,6 +1809,8 @@ local function seatMentionsIq(seat)
 		local blob = inst.Name
 		if inst:IsA("ProximityPrompt") then
 			blob = blob .. " " .. inst.ActionText .. " " .. inst.ObjectText
+		elseif inst:IsA("TextLabel") or inst:IsA("TextButton") then
+			blob = blob .. " " .. (inst.Text or "")
 		end
 		return mentionsIq(blob)
 	end
@@ -1751,22 +1848,69 @@ local function findIqSeat()
 	local origin = root and root.Position or Vector3.zero
 	local best = nil
 	local bestDist = math.huge
+	local signPos = nil
+	local signDist = math.huge
+	local names = {}
 	local seen = 0
 	for _, inst in ipairs(workspace:GetDescendants()) do
 		seen = seen + 1
-		if seen > 4000 then
+		if seen > 6000 then
 			break
 		end
-		if (inst:IsA("Seat") or inst:IsA("VehicleSeat")) and not ownedByPlayer(inst) and seatMentionsIq(inst) then
-			local dist = (inst.Position - origin).Magnitude
-			if dist < bestDist then
-				bestDist = dist
-				best = inst
+		if (inst:IsA("Seat") or inst:IsA("VehicleSeat")) and not ownedByPlayer(inst) then
+			if #names < 6 then
+				table.insert(names, inst.Name)
+			end
+			if seatMentionsIq(inst) then
+				local dist = (inst.Position - origin).Magnitude
+				if dist < bestDist then
+					bestDist = dist
+					best = inst
+				end
+			end
+		elseif not signPos or signDist > 0 then
+			local blob = nil
+			if inst:IsA("TextLabel") or inst:IsA("TextButton") then
+				blob = inst.Text
+			elseif inst:IsA("ProximityPrompt") then
+				blob = inst.Name .. " " .. inst.ActionText .. " " .. inst.ObjectText
+			end
+			if blob and mentionsIq(blob) then
+				local pos = iqPoint(inst)
+				if not pos then
+					local part = inst:FindFirstAncestorWhichIsA("BasePart")
+					local board = inst:FindFirstAncestorWhichIsA("BillboardGui") or inst:FindFirstAncestorWhichIsA("SurfaceGui")
+					if board and board.Adornee and board.Adornee:IsA("BasePart") then
+						pos = board.Adornee.Position
+					elseif part then
+						pos = part.Position
+					end
+				end
+				if pos then
+					local dist = (pos - origin).Magnitude
+					if dist < signDist then
+						signDist = dist
+						signPos = pos
+					end
+				end
+			end
+		end
+	end
+	if not best and signPos then
+		local nearDist = 45
+		for _, inst in ipairs(workspace:GetDescendants()) do
+			if (inst:IsA("Seat") or inst:IsA("VehicleSeat")) and not ownedByPlayer(inst) then
+				local dist = (inst.Position - signPos).Magnitude
+				if dist < nearDist then
+					nearDist = dist
+					best = inst
+				end
 			end
 		end
 	end
 	iqSeat.at = now
 	iqSeat.seat = best
+	iqSeat.names = table.concat(names, ", ")
 	return best
 end
 
@@ -1800,20 +1944,38 @@ local function runIq(root)
 		state.nextIqRead = now + 0.6
 		refreshIq()
 	end
-	state.locking = true
-	state.iqBusy = true
 	local _, humanoid = characterParts()
 	if not humanoid then
+		state.iqBusy = false
 		return
 	end
 	local seat = findIqSeat()
 	if not seat then
+		state.iqBusy = false
+		state.locking = false
 		if now > (state.nextIqNote or 0) then
 			state.nextIqNote = now + 6
-			pushLog("No IQ chair")
+			local names = iqSeat.names
+			if names and names ~= "" then
+				pushLog("No IQ chair. Seats: " .. names)
+			else
+				pushLog("No IQ chair")
+			end
 		end
 		return
 	end
+	if seat.Occupant and seat.Occupant ~= humanoid then
+		state.iqBusy = false
+		state.locking = false
+		if now > (state.nextIqNote or 0) then
+			state.nextIqNote = now + 6
+			pushLog("IQ chair is taken")
+		end
+		return
+	end
+	state.locking = true
+	state.iqBusy = true
+	state.killPart = nil
 	if humanoid.SeatPart == seat then
 		pcall(function()
 			root.AssemblyLinearVelocity = Vector3.zero
@@ -1821,23 +1983,11 @@ local function runIq(root)
 		end)
 		return
 	end
-	if seat.Occupant and seat.Occupant ~= humanoid then
-		if now > (state.nextIqNote or 0) then
-			state.nextIqNote = now + 6
-			pushLog("IQ chair is taken")
-		end
-		return
-	end
 	if humanoid.SeatPart and humanoid.SeatPart ~= seat then
 		humanoid.Sit = false
 	end
-	root.CFrame = seat.CFrame * CFrame.new(0, 3, 0)
 	pcall(function()
-		root.AssemblyLinearVelocity = Vector3.zero
-		root.AssemblyAngularVelocity = Vector3.zero
-	end)
-	pcall(function()
-		seat:Sit(humanoid)
+		seat.Disabled = false
 	end)
 	local tried = state.iqTried[seat]
 	if not tried or now - tried > 2 then
@@ -1848,15 +1998,25 @@ local function runIq(root)
 			pushLog("IQ chair " .. seat.Name)
 		end
 	end
+	root.CFrame = seat.CFrame * CFrame.new(0, 3, 0)
+	pcall(function()
+		root.AssemblyLinearVelocity = Vector3.zero
+		root.AssemblyAngularVelocity = Vector3.zero
+	end)
+	pcall(function()
+		seat:Sit(humanoid)
+	end)
 end
 
 local function runCombat(root)
 	if not inPortal() then
 		state.locking = false
+		state.killPart = nil
 		return
 	end
-	if state.autoIq then
+	if state.iqBusy then
 		state.locking = true
+		state.killPart = nil
 		return
 	end
 	local now = os.clock()
@@ -1876,9 +2036,11 @@ local function runCombat(root)
 		end
 		if not part then
 			state.locking = false
+			state.killPart = nil
 			return
 		end
 		state.locking = true
+		state.killPart = part
 		placeBehind(root, part)
 		if state.lastTarget ~= label then
 			state.lastTarget = label
@@ -1890,11 +2052,8 @@ local function runCombat(root)
 		end
 		return
 	end
+	state.killPart = nil
 	local scraping = state.autoMat or (state.autoQuest and state.questCollect)
-	if state.iqBusy then
-		state.locking = true
-		return
-	end
 	if not scraping and not state.autoFarm then
 		state.locking = false
 		return
@@ -1924,9 +2083,11 @@ local function runCombat(root)
 	end
 	if not part then
 		state.locking = false
+		state.killPart = nil
 		return
 	end
 	state.locking = true
+	state.killPart = part
 	if state.lastTarget ~= label then
 		state.lastTarget = label
 		pushLog("Target " .. tostring(label))
@@ -1942,9 +2103,6 @@ local function onHeartbeat()
 	if not character or not humanoid or not root then
 		return
 	end
-	if state.autoIq or state.autoMat or state.autoKill or state.autoQuest then
-		state.locking = true
-	end
 	if state.speed and inPortal() then
 		if savedWalk == nil then
 			savedWalk = humanoid.WalkSpeed
@@ -1958,10 +2116,10 @@ local function onHeartbeat()
 		end
 		state.speedApplied = false
 	end
-	if state.autoIq and next(collideSaved) then
+	if state.iqBusy and next(collideSaved) then
 		restoreCollide()
 	end
-	if state.noclip and inPortal() and not state.autoIq then
+	if state.noclip and inPortal() and not state.iqBusy then
 		for _, part in ipairs(character:GetDescendants()) do
 			if part:IsA("BasePart") then
 				if collideSaved[part] == nil then
@@ -1971,7 +2129,7 @@ local function onHeartbeat()
 			end
 		end
 	end
-	if state.fly and inPortal() and not state.autoIq then
+	if state.fly and inPortal() and not state.iqBusy and not state.killPart then
 		local gyro, velocity = ensureFly(root)
 		local camera = workspace.CurrentCamera
 		if gyro and camera then
@@ -1993,10 +2151,22 @@ local function onHeartbeat()
 			root.CFrame = state.safe
 		end
 	end
-	runIq(root)
-	runMaterials(root)
+	local function feature(name, fn)
+		local ok, err = pcall(fn)
+		if not ok and os.clock() > (state.nextErr or 0) then
+			state.nextErr = os.clock() + 5
+			pushLog(name .. " failed")
+			warn("[VOIDZ] " .. name .. " " .. tostring(err))
+		end
+	end
+	feature("IQ", function()
+		runIq(root)
+	end)
+	feature("Scrap", function()
+		runMaterials(root)
+	end)
 	local scrapOn = state.autoMat or (state.autoQuest and state.questCollect)
-	if (state.autoRegen or scrapOn) and not state.autoIq and inPortal() and humanoid.Health > 0 and humanoid.MaxHealth > 0 then
+	if (state.autoRegen or scrapOn) and not state.iqBusy and inPortal() and humanoid.Health > 0 and humanoid.MaxHealth > 0 then
 		if humanoid.Health < humanoid.MaxHealth * 0.45 then
 			if (state.lastRegen or 0) + 1.4 < os.clock() then
 				state.lastRegen = os.clock()
@@ -2012,8 +2182,29 @@ local function onHeartbeat()
 			end
 		end
 	end
-	runCombat(root)
-	if state.autoBuild and inPortal() and not state.locking and not state.autoIq then
+	feature("Combat", function()
+		runCombat(root)
+	end)
+	local cameraNow = workspace.CurrentCamera
+	if state.killPart and cameraNow then
+		if state.savedCamType == nil then
+			state.savedCamType = cameraNow.CameraType
+		end
+		cameraNow.CameraType = Enum.CameraType.Scriptable
+	elseif cameraNow and state.savedCamType ~= nil then
+		cameraNow.CameraType = state.savedCamType
+		state.savedCamType = nil
+	end
+	if state.killPart then
+		if state.savedRotate == nil then
+			state.savedRotate = humanoid.AutoRotate
+		end
+		humanoid.AutoRotate = false
+	elseif state.savedRotate ~= nil then
+		humanoid.AutoRotate = state.savedRotate
+		state.savedRotate = nil
+	end
+	if state.autoBuild and inPortal() and not state.locking and not state.iqBusy then
 		local now = os.clock()
 		if now >= (state.nextBuild or 0) then
 			state.nextBuild = now + 0.5
@@ -2743,10 +2934,10 @@ function renderPage()
 			end
 			state.autoIq = not state.autoIq
 			if state.autoIq then
-				state.locking = true
 				refreshIq()
 			else
 				state.iqBusy = false
+				state.locking = false
 			end
 			pushLog(state.autoIq and ("Auto IQ on · " .. state.iqText) or "Auto IQ off")
 			renderPage()
@@ -3068,6 +3259,9 @@ function renderPage()
 end
 
 local function shutdown()
+	pcall(function()
+		RunService:UnbindFromRenderStep("VOIDZ_PORTAL_STICK")
+	end)
 	if not state.alive then
 		return
 	end
@@ -3422,7 +3616,7 @@ bind(UserInputService.InputEnded, function(input)
 	end
 end)
 bind(UserInputService.JumpRequest, function()
-	if not state.infJump or not inPortal() or state.autoIq then
+	if not state.infJump or not inPortal() or state.iqBusy then
 		return
 	end
 	local _, humanoid = characterParts()
@@ -3431,6 +3625,30 @@ bind(UserInputService.JumpRequest, function()
 	end
 end)
 bind(RunService.Heartbeat, onHeartbeat)
+pcall(function()
+	RunService:UnbindFromRenderStep("VOIDZ_PORTAL_STICK")
+end)
+RunService:BindToRenderStep("VOIDZ_PORTAL_STICK", Enum.RenderPriority.Camera.Value + 5, function()
+	if not state.alive or not state.killPart or not state.killPart.Parent then
+		return
+	end
+	local ok, err = pcall(function()
+		local _, stickHumanoid, stickRoot = characterParts()
+		if not stickRoot then
+			return
+		end
+		if stickHumanoid then
+			stickHumanoid.AutoRotate = false
+			stickHumanoid.PlatformStand = false
+		end
+		placeBehind(stickRoot, state.killPart)
+	end)
+	if not ok and os.clock() > (state.nextErr or 0) then
+		state.nextErr = os.clock() + 5
+		pushLog("Kill aim failed")
+		warn("[VOIDZ] kill " .. tostring(err))
+	end
+end)
 bind(Players.PlayerAdded, function(player)
 	pushLog(player.DisplayName .. " joined")
 	renderPlayers()
