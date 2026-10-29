@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.27
+-- BUILD 2026-10-29-1.6.28
 -- Place 75108253383447 · Universe 10767619742
 -- RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.27"
+local BUILD = "2026-10-29-1.6.28"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -1776,23 +1776,47 @@ placeBehind = function(root, part, aimCamera)
 			part = torso
 		end
 	end
-	local look = part.CFrame.LookVector
-	local flat = Vector3.new(look.X, 0, look.Z)
-	if flat.Magnitude < 0.2 then
-		flat = state.killFace or Vector3.new(0, 0, -1)
-	else
-		flat = flat.Unit
-	end
-	if state.killFace and state.killFace.Magnitude > 0.2 then
-		if state.killFace:Dot(flat) < 0 then
-			flat = state.killFace
-		else
-			flat = state.killFace:Lerp(flat, 0.45)
-			if flat.Magnitude > 0.05 then
-				flat = flat.Unit
+	local flat = (function()
+		local function horizontal(inst)
+			if not inst or not inst:IsA("BasePart") then
+				return nil
+			end
+			local look = inst.CFrame.LookVector
+			local yaw = Vector3.new(look.X, 0, look.Z)
+			if yaw.Magnitude < 0.2 then
+				return nil
+			end
+			return yaw.Unit
+		end
+		local hrp = model and model:FindFirstChild("HumanoidRootPart") or part
+		local body = model and (model:FindFirstChild("Torso") or model:FindFirstChild("UpperTorso") or model:FindFirstChild("LowerTorso"))
+		local rootYaw = horizontal(hrp)
+		local bodyYaw = horizontal(body)
+		local yaw = rootYaw or bodyYaw
+		if rootYaw and bodyYaw and rootYaw:Dot(bodyYaw) < 0.5 then
+			yaw = bodyYaw
+		end
+		if yaw then
+			return yaw
+		end
+		local head = model and model:FindFirstChild("Head")
+		local headYaw = horizontal(head)
+		if headYaw then
+			return headYaw
+		end
+		local humanoid = model and model:FindFirstChildOfClass("Humanoid")
+		local move = humanoid and humanoid.MoveDirection
+		if move then
+			local moveYaw = Vector3.new(move.X, 0, move.Z)
+			if moveYaw.Magnitude > 0.2 then
+				return moveYaw.Unit
 			end
 		end
-	end
+		if state.killFace and state.killFace.Magnitude > 0.2 then
+			return state.killFace.Unit
+		end
+		return Vector3.new(0, 0, -1)
+	end)()
 	state.killFace = flat
 	local pos = part.Position - flat * 7 + Vector3.new(0, 2, 0)
 	local aimPart = model and (model:FindFirstChild("UpperTorso") or model:FindFirstChild("Torso") or model:FindFirstChild("Head"))
@@ -1811,7 +1835,13 @@ placeBehind = function(root, part, aimCamera)
 		state.simSet = true
 		pcall(setsimulationradius, 1000, 1000)
 	end
-	root.CFrame = CFrame.lookAt(pos, aim)
+	local stand = CFrame.lookAt(pos, aim)
+	root.CFrame = stand
+	if state.autoKill and root.Parent then
+		pcall(function()
+			root.Parent:PivotTo(stand)
+		end)
+	end
 	pcall(function()
 		root.AssemblyLinearVelocity = Vector3.zero
 		root.AssemblyAngularVelocity = Vector3.zero
@@ -1857,9 +1887,9 @@ placeBehind = function(root, part, aimCamera)
 		if not killHold then
 			killHold = Instance.new("BodyPosition")
 			killHold.Name = "VOIDZ_KillHold"
-			killHold.MaxForce = Vector3.new(1, 1, 1) * 1000000
-			killHold.P = 100000
-			killHold.D = 2000
+			killHold.MaxForce = Vector3.new(1, 1, 1) * 10000000
+			killHold.P = 1000000
+			killHold.D = 100
 			killHold.Parent = root
 		end
 		killHold.Position = pos
@@ -5050,7 +5080,7 @@ function renderPage()
 
 	if state.page == "PvP" then
 		heading(centerHolder, "Combat", nextOrder())
-		note(centerHolder, "Keeps teleporting you behind the player and turns you to face them until you turn it off. You can still shoot, zoom, and click this off. Auto fire shoots for you.", nextOrder())
+		note(centerHolder, "Keeps you behind them even when they turn or move in first person, until you turn it off. You can still shoot, zoom, and click this off. Auto fire shoots for you.", nextOrder())
 		toggleRow(centerHolder, "Auto kill", nextOrder(), state.autoKill, function()
 			if not state.autoKill and not requireGame() then
 				return
@@ -5061,6 +5091,7 @@ function renderPage()
 				state.killUser = nil
 				state.aimPoint = nil
 				state.aimPart = nil
+				state.killFace = nil
 				state.killHop = nil
 				state.locking = false
 				releaseKillCamera()
@@ -5792,7 +5823,7 @@ RunService:BindToRenderStep("VOIDZ_PORTAL_MAT", Enum.RenderPriority.Last.Value, 
 		pinMaterial(matRoot, state.matFocus)
 	end
 end)
-RunService:BindToRenderStep("VOIDZ_PORTAL_STICK", Enum.RenderPriority.Last.Value + 1, function()
+RunService:BindToRenderStep("VOIDZ_PORTAL_STICK", Enum.RenderPriority.Last.Value + 50, function()
 	if not state.alive then
 		return
 	end
@@ -5891,6 +5922,28 @@ RunService:BindToRenderStep("VOIDZ_PORTAL_STICK", Enum.RenderPriority.Last.Value
 		pushLog("Kill aim failed")
 		warn("[VOIDZ] kill " .. tostring(err))
 	end
+end)
+bind(RunService.Stepped, function()
+	if not state.alive or not state.autoKill or state.fleeing then
+		return
+	end
+	local _, stickHumanoid, stickRoot = characterParts()
+	if not stickRoot then
+		return
+	end
+	local locked = state.killUser and Players:GetPlayerByUserId(state.killUser)
+	local part = locked and playerRoot(locked)
+	if not part or not part.Parent then
+		part = state.killPart
+	end
+	if not part or not part.Parent then
+		return
+	end
+	if stickHumanoid then
+		stickHumanoid.AutoRotate = false
+		stickHumanoid.PlatformStand = false
+	end
+	placeBehind(stickRoot, part, false)
 end)
 bind(Players.PlayerAdded, function(player)
 	pushLog(player.DisplayName .. " joined")
