@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.2.0
+-- BUILD 2026-10-29-1.3.0
 -- Place 75108253383447 · Universe 10767619742
 -- RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.2.0"
+local BUILD = "2026-10-29-1.3.0"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -88,6 +88,13 @@ local state = {
 	questRange = 400,
 	locking = false,
 	autoBuild = false,
+	autoMat = false,
+	material = nil,
+	matOpen = false,
+	matList = {},
+	matIndex = {},
+	matScanAt = 0,
+	tried = {},
 	buildKind = "Pad",
 	buildSize = 24,
 	buildReach = 16,
@@ -692,6 +699,279 @@ local function placeBuild(kind, root, quiet)
 	end
 end
 
+local function prettyMaterial(id)
+	if string.sub(id, 1, 5) == "name:" then
+		return "Item: " .. string.sub(id, 6)
+	end
+	return string.gsub(id, "(%l)(%u)", "%1 %2")
+end
+
+local function dropHeld()
+	local welds = {}
+	local function take(rootInst)
+		if not rootInst then
+			return
+		end
+		for _, child in ipairs(rootInst:GetDescendants()) do
+			if child.Name == "VOIDZ_Hold" then
+				table.insert(welds, child)
+			end
+		end
+	end
+	take(LocalPlayer.Character)
+	take(workspace)
+	for _, weld in ipairs(welds) do
+		local part = weld.Part1
+		weld:Destroy()
+		if part and part:IsA("BasePart") then
+			part.CanCollide = true
+		end
+	end
+end
+
+local function materialEligible(part)
+	if not part:IsA("BasePart") then
+		return false
+	end
+	if part.Name == "VOIDZ_Block" or part.Name == "HumanoidRootPart" or part.Name == "VOIDZ_Follow" then
+		return false
+	end
+	if part:FindFirstChild("VOIDZ_Hold") then
+		return false
+	end
+	local character = LocalPlayer.Character
+	if character and part:IsDescendantOf(character) then
+		return false
+	end
+	local built = workspace:FindFirstChild(BUILD_FOLDER)
+	if built and part:IsDescendantOf(built) then
+		return false
+	end
+	local owner = part:FindFirstAncestorOfClass("Model")
+	if owner and Players:GetPlayerFromCharacter(owner) then
+		return false
+	end
+	if part.Transparency >= 0.95 then
+		return false
+	end
+	if part.Size.X > 30 or part.Size.Y > 30 or part.Size.Z > 30 then
+		return false
+	end
+	return true
+end
+
+local function scanMaterials()
+	local index = {}
+	local seenModel = {}
+	local seen = 0
+	for _, inst in ipairs(workspace:GetDescendants()) do
+		seen = seen + 1
+		if seen > 6000 then
+			break
+		end
+		if inst:IsA("BasePart") and materialEligible(inst) then
+			local target = inst
+			local model = inst:FindFirstAncestorOfClass("Model")
+			if model and not Players:GetPlayerFromCharacter(model) then
+				if seenModel[model] then
+					target = nil
+				else
+					seenModel[model] = true
+					target = model.PrimaryPart or inst
+				end
+			end
+			if target and materialEligible(target) then
+				local matKey = target.Material.Name
+				index[matKey] = index[matKey] or {}
+				table.insert(index[matKey], target)
+				if not target.Anchored then
+					local label = model and model.Name or target.Name
+					if label ~= "" and label ~= "Part" and label ~= "MeshPart" and label ~= "UnionOperation" and label ~= "Model" then
+						local nameKey = "name:" .. label
+						index[nameKey] = index[nameKey] or {}
+						table.insert(index[nameKey], target)
+					end
+				end
+			end
+		end
+	end
+	local list = {}
+	for id, parts in pairs(index) do
+		table.insert(list, {
+			id = id,
+			count = #parts,
+			label = prettyMaterial(id) .. "  (" .. tostring(#parts) .. ")",
+		})
+	end
+	table.sort(list, function(a, b)
+		if a.count == b.count then
+			return a.label < b.label
+		end
+		return a.count > b.count
+	end)
+	state.matIndex = index
+	state.matList = list
+	state.matScanAt = os.clock()
+	return #list
+end
+
+local function wasTried(part)
+	local at = state.tried[part]
+	if not at then
+		return false
+	end
+	if os.clock() - at < 6 then
+		return true
+	end
+	state.tried[part] = nil
+	return false
+end
+
+local function closestMaterial(origin)
+	local parts = state.matIndex[state.material]
+	if not parts then
+		return nil
+	end
+	local best = nil
+	local bestDist = math.huge
+	for i = #parts, 1, -1 do
+		local part = parts[i]
+		if not part.Parent or part:FindFirstChild("VOIDZ_Hold") then
+			table.remove(parts, i)
+		elseif wasTried(part) then
+			-- leave it for a later pass
+		else
+			local dist = (part.Position - origin).Magnitude
+			if dist < bestDist then
+				bestDist = dist
+				best = part
+			end
+		end
+	end
+	return best
+end
+
+local function fireCollect(inst, root)
+	local prompts = {}
+	local function collectFrom(obj)
+		if not obj then
+			return
+		end
+		for _, child in ipairs(obj:GetChildren()) do
+			if child:IsA("ProximityPrompt") or child:IsA("ClickDetector") then
+				table.insert(prompts, child)
+			end
+		end
+	end
+	collectFrom(inst)
+	collectFrom(inst.Parent)
+	for _, item in ipairs(prompts) do
+		if item:IsA("ProximityPrompt") then
+			pcall(function()
+				item.MaxActivationDistance = 100
+				item.HoldDuration = 0
+			end)
+			if type(fireproximityprompt) == "function" then
+				pcall(fireproximityprompt, item)
+				pcall(fireproximityprompt, item, true)
+			end
+			pcall(function()
+				item:InputHoldBegin()
+				item:InputHoldEnd()
+			end)
+		elseif type(fireclickdetector) == "function" then
+			pcall(fireclickdetector, item)
+		end
+	end
+	if root and type(firetouchinterest) == "function" and inst:IsA("BasePart") then
+		pcall(firetouchinterest, root, inst, 0)
+		task.delay(0.12, function()
+			if root.Parent and inst.Parent then
+				pcall(firetouchinterest, root, inst, 1)
+			end
+		end)
+	end
+	local tool = inst:IsA("Tool") and inst or (inst.Parent and inst.Parent:IsA("Tool") and inst.Parent)
+	if tool then
+		local _, humanoid = characterParts()
+		if humanoid then
+			pcall(function()
+				humanoid:EquipTool(tool)
+			end)
+		end
+	end
+end
+
+local function forcePickup(part, root)
+	local stand = part.Position + Vector3.new(0, math.max(3, part.Size.Y * 0.5 + 2), 0)
+	root.CFrame = CFrame.lookAt(stand, part.Position)
+	pcall(function()
+		root.AssemblyLinearVelocity = Vector3.zero
+	end)
+	fireCollect(part, root)
+	state.tried[part] = os.clock()
+	task.delay(0.2, function()
+		if not state.alive or not part.Parent or not part:IsA("BasePart") then
+			return
+		end
+		if part:FindFirstChild("VOIDZ_Hold") then
+			return
+		end
+		local _, _, current = characterParts()
+		if not current then
+			return
+		end
+		pcall(function()
+			part.Anchored = false
+		end)
+		if part.Anchored then
+			return
+		end
+		part.CanCollide = false
+		part.CFrame = current.CFrame * CFrame.new(0, 1.5, -2)
+		local weld = Instance.new("WeldConstraint")
+		weld.Name = "VOIDZ_Hold"
+		weld.Part0 = current
+		weld.Part1 = part
+		weld.Parent = part
+	end)
+end
+
+local function runMaterials(root)
+	if not state.autoMat or not inPortal() then
+		return
+	end
+	local now = os.clock()
+	if now < (state.nextMat or 0) then
+		return
+	end
+	state.nextMat = now + 0.7
+	if not state.material then
+		if now > (state.nextMatNote or 0) then
+			state.nextMatNote = now + 4
+			pushLog("Open Materials and choose one")
+		end
+		return
+	end
+	if now - (state.matScanAt or 0) > 3 then
+		scanMaterials()
+	end
+	local part = closestMaterial(root.Position)
+	if not part then
+		scanMaterials()
+		part = closestMaterial(root.Position)
+	end
+	if not part then
+		if now > (state.nextMatNote or 0) then
+			state.nextMatNote = now + 4
+			pushLog("No " .. prettyMaterial(state.material) .. " left")
+		end
+		return
+	end
+	forcePickup(part, root)
+	pushLog("Pickup " .. part.Name .. " · " .. prettyMaterial(state.material))
+end
+
 local function revertFeatures()
 	state.fly = false
 	state.noclip = false
@@ -706,6 +986,7 @@ local function revertFeatures()
 	state.autoFarm = false
 	state.autoQuest = false
 	state.autoBuild = false
+	state.autoMat = false
 	state.locking = false
 	state.fovOn = false
 	table.clear(held)
@@ -716,6 +997,7 @@ local function revertFeatures()
 	restoreCharacter()
 	sweepHubObjects()
 	clearBuild()
+	dropHeld()
 end
 
 local function stopAll()
@@ -1021,6 +1303,9 @@ local function onHeartbeat()
 	if not character or not humanoid or not root then
 		return
 	end
+	if state.autoMat then
+		state.locking = true
+	end
 	if state.speed and inPortal() then
 		if savedWalk == nil then
 			savedWalk = humanoid.WalkSpeed
@@ -1094,6 +1379,7 @@ local function onHeartbeat()
 			end
 		end
 	end
+	runMaterials(root)
 end
 
 local function bind(signal, fn)
@@ -1391,7 +1677,7 @@ function renderPage()
 	if state.page == "Home" then
 		local where = inPortal() and "Portal Sandbox is loaded." or "This place is not Portal Sandbox. Join the game, then execute again."
 		note(centerHolder, where .. " PlaceId " .. tostring(game.PlaceId) .. ". Build " .. BUILD .. ".", nextOrder())
-		note(centerHolder, "RightShift hides the hub. PvP and Farm run the combat loops. Build places floors, walls, stairs, and a portal bay. Pick a player on the right for a single target.", nextOrder())
+		note(centerHolder, "RightShift hides the hub. Materials scans the map, teleports you to the closest selected material, picks it up, then goes to the next one.", nextOrder())
 		for _, line in ipairs(logs) do
 			local row = Instance.new("TextLabel")
 			row.BackgroundColor3 = C.card
@@ -1521,6 +1807,68 @@ function renderPage()
 		end, function()
 			state.killRange = math.min(2000, state.killRange + 50)
 			renderPage()
+		end)
+		return
+	end
+
+	if state.page == "Materials" then
+		if os.clock() - (state.matScanAt or 0) > 2 then
+			scanMaterials()
+		end
+		local chosen = state.material and prettyMaterial(state.material) or "None"
+		local left = 0
+		if state.material and state.matIndex[state.material] then
+			left = #state.matIndex[state.material]
+		end
+		note(centerHolder, "Scan finds loose parts by material and by item name. Auto collect teleports you onto the closest one, fires its prompt or touch, pulls it to you, then moves to the next closest.", nextOrder())
+		note(centerHolder, "Selected: " .. chosen .. "  ·  " .. tostring(left) .. " left. Found " .. tostring(#state.matList) .. " types.", nextOrder())
+		actionButton(centerHolder, "Scan materials", nextOrder(), function()
+			if not requireGame() then
+				return
+			end
+			local count = scanMaterials()
+			pushLog("Scan found " .. tostring(count) .. " material types")
+			renderPage()
+		end)
+		actionButton(centerHolder, state.matOpen and "Close list" or ("Material: " .. chosen), nextOrder(), function()
+			state.matOpen = not state.matOpen
+			if state.matOpen then
+				scanMaterials()
+			end
+			renderPage()
+		end)
+		if state.matOpen then
+			if #state.matList == 0 then
+				note(centerHolder, "No loose parts found. Walk into the map and press Scan materials.", nextOrder())
+			end
+			for _, item in ipairs(state.matList) do
+				actionButton(centerHolder, item.label, nextOrder(), function()
+					state.material = item.id
+					state.matOpen = false
+					pushLog("Selected " .. prettyMaterial(item.id))
+					renderPage()
+				end)
+			end
+		end
+		toggleRow(centerHolder, "Auto collect", nextOrder(), state.autoMat, function()
+			if not state.autoMat and not requireGame() then
+				return
+			end
+			if not state.autoMat and not state.material then
+				pushLog("Choose a material first")
+				return
+			end
+			state.autoMat = not state.autoMat
+			if state.autoMat then
+				state.locking = true
+				scanMaterials()
+			end
+			pushLog(state.autoMat and ("Collecting " .. prettyMaterial(state.material)) or "Auto collect off")
+			renderPage()
+		end)
+		actionButton(centerHolder, "Drop held parts", nextOrder(), function()
+			dropHeld()
+			pushLog("Dropped held parts")
 		end)
 		return
 	end
@@ -1795,7 +2143,7 @@ function renderPage()
 	end
 
 	if state.page == "Settings" then
-		note(centerHolder, "Unload script turns off fly, noclip, speed, infinite jump, click teleport, anti-void, auto regenerate, auto kill, auto farm, auto quest, and auto rebuild. It removes ESP, fullbright, the field-of-view change, and built parts, puts your camera and character back, and deletes this window.", nextOrder())
+		note(centerHolder, "Unload script turns off fly, noclip, speed, jump, teleport, auto regenerate, combat, auto rebuild, and auto collect. It drops held parts, removes built parts and ESP, restores lighting and field of view, and deletes this window.", nextOrder())
 		note(centerHolder, "Build " .. BUILD .. ". RightShift hides the hub. The chat bar stays available.", nextOrder())
 		actionButton(centerHolder, "Unload script", nextOrder(), function()
 			if type(ENV.VOIDZ_PORTAL_STOP) == "function" then
@@ -2024,7 +2372,7 @@ sideLayout.Padding = UDim.new(0, 4)
 sideLayout.SortOrder = Enum.SortOrder.LayoutOrder
 sideLayout.Parent = sideList
 
-local pages = { "Home", "Move", "PvP", "Farm", "Build", "Portals", "Tools", "Visuals", "Players", "Settings" }
+local pages = { "Home", "Move", "Materials", "PvP", "Farm", "Build", "Portals", "Tools", "Visuals", "Players", "Settings" }
 for index, name in ipairs(pages) do
 	local button = Instance.new("TextButton")
 	button.Size = UDim2.new(1, 0, 0, 30)
