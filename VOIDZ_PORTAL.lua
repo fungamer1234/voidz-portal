@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.1
+-- BUILD 2026-10-29-1.6.2
 -- Place 75108253383447 · Universe 10767619742
 -- RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.1"
+local BUILD = "2026-10-29-1.6.2"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -967,6 +967,7 @@ local function revertFeatures()
 	state.autoMat = false
 	state.locking = false
 	state.killPart = nil
+	state.aimPoint = nil
 	state.iqBusy = false
 	state.fovOn = false
 	local camera = workspace.CurrentCamera
@@ -1092,22 +1093,64 @@ local function nearestNpc(origin)
 	return bestPart, bestName
 end
 
+local GUN_HINTS = { "blaster", "laser", "mech", "pistol", "gun", "portal" }
+
+local function isGun(tool)
+	local name = string.lower(tool.Name)
+	for _, hint in ipairs(GUN_HINTS) do
+		if string.find(name, hint, 1, true) then
+			return true
+		end
+	end
+	return false
+end
+
+local function pointerOverHub()
+	if not window or not window.Visible then
+		return false
+	end
+	local pos = UserInputService:GetMouseLocation()
+	local origin = window.AbsolutePosition
+	local size = window.AbsoluteSize
+	return pos.X >= origin.X and pos.X <= origin.X + size.X and pos.Y >= origin.Y and pos.Y <= origin.Y + size.Y
+end
+
 local function ensureWeapon()
 	local character = LocalPlayer.Character
+	local _, humanoid = characterParts()
 	if character then
 		for _, child in ipairs(character:GetChildren()) do
-			if child:IsA("Tool") then
+			if child:IsA("Tool") and isGun(child) then
 				return child
 			end
 		end
 	end
-	local tool = findTool({ "portal", "blaster", "mech", "laser", "gun", "pistol", "knife", "robo" })
-	local _, humanoid = characterParts()
+	local tool = findTool(GUN_HINTS)
 	if tool and humanoid then
 		pcall(function()
+			humanoid:UnequipTools()
 			humanoid:EquipTool(tool)
 		end)
+		if state.lastGun ~= tool.Name then
+			state.lastGun = tool.Name
+			pushLog("Gun " .. tool.Name)
+		end
 		return tool
+	end
+	if os.clock() > (state.nextGunKey or 0) and not UserInputService:GetFocusedTextBox() then
+		state.nextGunKey = os.clock() + 1.2
+		pcall(function()
+			VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.X, false, game)
+			task.delay(0.06, function()
+				if not state.alive then
+					return
+				end
+				pcall(function()
+					VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.X, false, game)
+				end)
+			end)
+		end)
+		pushLog("Pulling mech blaster")
 	end
 	return nil
 end
@@ -1119,34 +1162,12 @@ local function clickAttack()
 			tool:Activate()
 		end)
 	end
-	if type(mouse1press) == "function" then
-		pcall(mouse1press)
-		task.delay(0.05, function()
-			if state.alive and type(mouse1release) == "function" then
-				pcall(mouse1release)
-			end
-		end)
-	elseif type(mouse1click) == "function" then
+	if (not window or not window.Visible) and type(mouse1click) == "function" then
 		pcall(mouse1click)
 	end
-	local camera = workspace.CurrentCamera
-	local viewport = camera and camera.ViewportSize or Vector2.new(960, 540)
-	local x = viewport.X * 0.5
-	local y = viewport.Y * 0.5
-	pcall(function()
-		VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 0)
-	end)
-	task.delay(0.05, function()
-		if not state.alive then
-			return
-		end
-		pcall(function()
-			VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
-		end)
-	end)
 end
 
-local function placeBehind(root, part)
+local function placeBehind(root, part, aimCamera)
 	local look = part.CFrame.LookVector
 	local flat = Vector3.new(look.X, 0, look.Z)
 	if flat.Magnitude < 0.2 then
@@ -1155,22 +1176,68 @@ local function placeBehind(root, part)
 		flat = flat.Unit
 	end
 	local pos = part.Position - flat * 9 + Vector3.new(0, 2, 0)
-	local aim = part.Position + Vector3.new(0, 1.5, 0)
+	local head = part.Parent and part.Parent:FindFirstChild("Head")
+	local aim = (head and head.Position) or (part.Position + Vector3.new(0, 1.5, 0))
+	state.aimPoint = aim
 	root.CFrame = CFrame.lookAt(pos, aim)
 	pcall(function()
 		root.AssemblyLinearVelocity = Vector3.zero
 		root.AssemblyAngularVelocity = Vector3.zero
 	end)
-	local camera = workspace.CurrentCamera
-	if camera then
-		camera.CFrame = CFrame.lookAt(pos + Vector3.new(0, 1.2, 0), aim)
+	if aimCamera and not pointerOverHub() then
+		local camera = workspace.CurrentCamera
+		if camera then
+			camera.CFrame = CFrame.lookAt(pos + Vector3.new(0, 1.2, 0), aim)
+		end
 	end
-	ensureWeapon()
 end
 
 local function strike(root, part)
-	placeBehind(root, part)
+	placeBehind(root, part, true)
 	clickAttack()
+end
+
+local aimMouse = LocalPlayer:GetMouse()
+if aimMouse and type(hookmetamethod) == "function" then
+	local oldIndex
+	local hooked = pcall(function()
+		oldIndex = hookmetamethod(game, "__index", function(self, key)
+			if state.aimPoint and self == aimMouse then
+				if type(checkcaller) == "function" then
+					local callerOk, ours = pcall(checkcaller)
+					if callerOk and ours then
+						return oldIndex(self, key)
+					end
+				end
+				if key == "Hit" then
+					return CFrame.new(state.aimPoint)
+				elseif key == "Target" then
+					return state.killPart
+				elseif key == "UnitRay" then
+					local camera = workspace.CurrentCamera
+					local origin = camera and camera.CFrame.Position or state.aimPoint
+					local delta = state.aimPoint - origin
+					if delta.Magnitude < 0.05 then
+						delta = Vector3.new(0, 0, -1)
+					end
+					return Ray.new(origin, delta.Unit)
+				elseif key == "X" or key == "Y" then
+					local camera = workspace.CurrentCamera
+					if camera then
+						local screen = camera:WorldToViewportPoint(state.aimPoint)
+						if key == "X" then
+							return screen.X
+						end
+						return screen.Y
+					end
+				end
+			end
+			return oldIndex(self, key)
+		end)
+	end)
+	if not hooked then
+		oldIndex = nil
+	end
 end
 
 local function promptPosition(prompt)
@@ -1976,6 +2043,7 @@ local function runIq(root)
 	state.locking = true
 	state.iqBusy = true
 	state.killPart = nil
+	state.aimPoint = nil
 	if humanoid.SeatPart == seat then
 		pcall(function()
 			root.AssemblyLinearVelocity = Vector3.zero
@@ -2012,11 +2080,13 @@ local function runCombat(root)
 	if not inPortal() then
 		state.locking = false
 		state.killPart = nil
+		state.aimPoint = nil
 		return
 	end
 	if state.iqBusy then
 		state.locking = true
 		state.killPart = nil
+		state.aimPoint = nil
 		return
 	end
 	local now = os.clock()
@@ -2037,11 +2107,12 @@ local function runCombat(root)
 		if not part then
 			state.locking = false
 			state.killPart = nil
+			state.aimPoint = nil
 			return
 		end
 		state.locking = true
 		state.killPart = part
-		placeBehind(root, part)
+		placeBehind(root, part, true)
 		if state.lastTarget ~= label then
 			state.lastTarget = label
 			pushLog("Target " .. tostring(label))
@@ -2053,6 +2124,7 @@ local function runCombat(root)
 		return
 	end
 	state.killPart = nil
+	state.aimPoint = nil
 	local scraping = state.autoMat or (state.autoQuest and state.questCollect)
 	if not scraping and not state.autoFarm then
 		state.locking = false
@@ -2084,6 +2156,7 @@ local function runCombat(root)
 	if not part then
 		state.locking = false
 		state.killPart = nil
+		state.aimPoint = nil
 		return
 	end
 	state.locking = true
@@ -2186,12 +2259,7 @@ local function onHeartbeat()
 		runCombat(root)
 	end)
 	local cameraNow = workspace.CurrentCamera
-	if state.killPart and cameraNow then
-		if state.savedCamType == nil then
-			state.savedCamType = cameraNow.CameraType
-		end
-		cameraNow.CameraType = Enum.CameraType.Scriptable
-	elseif cameraNow and state.savedCamType ~= nil then
+	if cameraNow and state.savedCamType ~= nil and not state.killPart then
 		cameraNow.CameraType = state.savedCamType
 		state.savedCamType = nil
 	end
@@ -2838,12 +2906,22 @@ function renderPage()
 	end
 
 	if state.page == "PvP" then
-		note(centerHolder, "Auto kill keeps teleporting you behind a living player so you can shoot them. It works from anywhere on the map. It equips a knife, laser, or mech you already have and clicks. It does not invent a damage remote.", nextOrder())
+		note(centerHolder, "Auto kill stays behind a living player and pulls out a blaster, laser, mech, or portal gun. Shots are aimed at them. The hub does not take those clicks, so the toggles still turn off. It does not invent a damage remote.", nextOrder())
 		toggleRow(centerHolder, "Auto kill", nextOrder(), state.autoKill, function()
 			if not state.autoKill and not requireGame() then
 				return
 			end
 			state.autoKill = not state.autoKill
+			if not state.autoKill then
+				state.killPart = nil
+				state.aimPoint = nil
+				state.locking = false
+				local camera = workspace.CurrentCamera
+				if camera and state.savedCamType ~= nil then
+					camera.CameraType = state.savedCamType
+					state.savedCamType = nil
+				end
+			end
 			pushLog(state.autoKill and "Auto kill on" or "Auto kill off")
 			renderPage()
 		end)
@@ -2957,6 +3035,11 @@ function renderPage()
 				return
 			end
 			state.autoFarm = not state.autoFarm
+			if not state.autoFarm and not state.autoKill then
+				state.killPart = nil
+				state.aimPoint = nil
+				state.locking = false
+			end
 			pushLog(state.autoFarm and "Auto farm on" or "Auto farm off")
 			renderPage()
 		end)
@@ -3641,7 +3724,7 @@ RunService:BindToRenderStep("VOIDZ_PORTAL_STICK", Enum.RenderPriority.Camera.Val
 			stickHumanoid.AutoRotate = false
 			stickHumanoid.PlatformStand = false
 		end
-		placeBehind(stickRoot, state.killPart)
+		placeBehind(stickRoot, state.killPart, true)
 	end)
 	if not ok and os.clock() > (state.nextErr or 0) then
 		state.nextErr = os.clock() + 5
