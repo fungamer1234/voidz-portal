@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.7
+-- BUILD 2026-10-29-1.6.8
 -- Place 75108253383447 · Universe 10767619742
 -- RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.7"
+local BUILD = "2026-10-29-1.6.8"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -3392,18 +3392,24 @@ local function renderPlayers()
 		local blob = string.lower(player.DisplayName .. " " .. player.Name .. " " .. tostring(player.UserId))
 		if query == "" or string.find(blob, query, 1, true) then
 			shown = shown + 1
+			local picked = state.selected == player.UserId
 			local card = Instance.new("TextButton")
 			card.Size = UDim2.new(1, 0, 0, 64)
-			card.BackgroundColor3 = (state.selected == player.UserId) and C.card2 or C.card
+			card.BackgroundColor3 = picked and Color3.fromRGB(62, 40, 92) or C.card
 			card.AutoButtonColor = false
 			card.Text = ""
 			card.LayoutOrder = shown
 			card.Parent = playerList
 			corner(card, 8)
-			if state.selected == player.UserId then
+			local stroke = Instance.new("UIStroke")
+			stroke.Color = picked and C.accent or C.line
+			stroke.Thickness = picked and 2 or 1
+			stroke.Transparency = picked and 0 or 0.45
+			stroke.Parent = card
+			if picked then
 				local bar = Instance.new("Frame")
-				bar.Size = UDim2.new(0, 3, 1, -12)
-				bar.Position = UDim2.fromOffset(0, 6)
+				bar.Size = UDim2.new(0, 4, 1, -10)
+				bar.Position = UDim2.fromOffset(0, 5)
 				bar.BackgroundColor3 = C.accent
 				bar.BorderSizePixel = 0
 				bar.Parent = card
@@ -3411,25 +3417,25 @@ local function renderPlayers()
 			end
 			local avatar = Instance.new("ImageLabel")
 			avatar.Size = UDim2.fromOffset(40, 40)
-			avatar.Position = UDim2.fromOffset(10, 12)
+			avatar.Position = UDim2.fromOffset(12, 12)
 			avatar.BackgroundColor3 = C.card2
 			avatar.Image = "rbxthumb://type=AvatarHeadShot&id=" .. tostring(player.UserId) .. "&w=150&h=150"
 			avatar.Parent = card
 			corner(avatar, 20)
 			local name = Instance.new("TextLabel")
 			name.BackgroundTransparency = 1
-			name.Position = UDim2.fromOffset(58, 8)
-			name.Size = UDim2.new(1, -112, 0, 18)
+			name.Position = UDim2.fromOffset(60, 8)
+			name.Size = UDim2.new(1, -148, 0, 18)
 			name.Font = Enum.Font.GothamBold
 			name.TextSize = 14
 			name.TextXAlignment = Enum.TextXAlignment.Left
-			name.TextColor3 = C.text
+			name.TextColor3 = picked and C.accent or C.text
 			name.Text = player.DisplayName
 			name.Parent = card
 			local handle = Instance.new("TextLabel")
 			handle.BackgroundTransparency = 1
-			handle.Position = UDim2.fromOffset(58, 26)
-			handle.Size = UDim2.new(1, -112, 0, 14)
+			handle.Position = UDim2.fromOffset(60, 26)
+			handle.Size = UDim2.new(1, -148, 0, 14)
 			handle.Font = Enum.Font.Gotham
 			handle.TextSize = 12
 			handle.TextXAlignment = Enum.TextXAlignment.Left
@@ -3438,8 +3444,8 @@ local function renderPlayers()
 			handle.Parent = card
 			local userId = Instance.new("TextLabel")
 			userId.BackgroundTransparency = 1
-			userId.Position = UDim2.fromOffset(58, 42)
-			userId.Size = UDim2.new(1, -112, 0, 14)
+			userId.Position = UDim2.fromOffset(60, 42)
+			userId.Size = UDim2.new(1, -148, 0, 14)
 			userId.Font = Enum.Font.Gotham
 			userId.TextSize = 11
 			userId.TextXAlignment = Enum.TextXAlignment.Left
@@ -3447,21 +3453,29 @@ local function renderPlayers()
 			userId.Text = tostring(player.UserId)
 			userId.Parent = card
 			local role = Instance.new("TextLabel")
-			role.BackgroundTransparency = 1
+			role.BackgroundColor3 = picked and C.accent or C.card2
 			role.AnchorPoint = Vector2.new(1, 0.5)
-			role.Position = UDim2.new(1, -10, 0.5, 0)
-			role.Size = UDim2.fromOffset(70, 18)
-			role.Font = Enum.Font.GothamMedium
-			role.TextSize = 12
-			role.TextXAlignment = Enum.TextXAlignment.Right
-			role.TextColor3 = (player == LocalPlayer) and C.accent or C.good
-			role.Text = (player == LocalPlayer) and "You" or "Player"
+			role.Position = UDim2.new(1, -8, 0.5, 0)
+			role.Size = UDim2.fromOffset(78, 22)
+			role.Font = Enum.Font.GothamBold
+			role.TextSize = 11
+			role.TextXAlignment = Enum.TextXAlignment.Center
+			role.TextColor3 = picked and Color3.fromRGB(20, 12, 32) or C.muted
+			role.Text = picked and "SELECTED" or "Select"
 			role.Parent = card
+			corner(role, 6)
+			local userIdValue = player.UserId
+			local displayName = player.DisplayName
 			card.MouseButton1Click:Connect(function()
-				state.selected = player.UserId
-				pushLog("Selected " .. player.DisplayName)
+				if state.selected == userIdValue then
+					state.selected = nil
+					pushLog("Unselected " .. displayName)
+				else
+					state.selected = userIdValue
+					pushLog("Selected " .. displayName)
+				end
 				renderPlayers()
-				if state.page == "Players" or state.page == "Home" then
+				if state.page == "Players" then
 					renderPage()
 				end
 			end)
@@ -3810,19 +3824,27 @@ function renderPage()
 	if state.page == "Players" then
 		local picked = selectedPlayer()
 		if picked then
-			note(centerHolder, picked.DisplayName .. "  @" .. picked.Name .. "  " .. tostring(picked.UserId), nextOrder())
+			note(centerHolder, "SELECTED   " .. picked.DisplayName .. "   @" .. picked.Name .. "   " .. tostring(picked.UserId), nextOrder())
+			note(centerHolder, "This player is used for teleport, spectate, and auto kill. Click their card again to unselect.", nextOrder())
 		else
-			note(centerHolder, "Select a player on the right.", nextOrder())
+			note(centerHolder, "Nobody selected. Click a player on the right. A selected card turns purple and says SELECTED.", nextOrder())
 		end
-		actionButton(centerHolder, "Teleport to player", nextOrder(), function()
+		actionButton(centerHolder, picked and ("Teleport to " .. picked.DisplayName) or "Teleport to player", nextOrder(), function()
 			teleportToPlayer(selectedPlayer())
 		end)
-		actionButton(centerHolder, "Spectate", nextOrder(), function()
+		actionButton(centerHolder, picked and ("Spectate " .. picked.DisplayName) or "Spectate", nextOrder(), function()
 			spectate(selectedPlayer())
 		end)
 		actionButton(centerHolder, "Stop spectate", nextOrder(), function()
 			stopSpectate()
 			pushLog("Spectate off")
+		end)
+		actionButton(centerHolder, "Unselect", nextOrder(), function()
+			local current = selectedPlayer()
+			state.selected = nil
+			pushLog(current and ("Unselected " .. current.DisplayName) or "Nobody selected")
+			renderPlayers()
+			renderPage()
 		end)
 		actionButton(centerHolder, "Copy username", nextOrder(), function()
 			local player = selectedPlayer()
