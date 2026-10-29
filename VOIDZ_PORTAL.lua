@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.35
+-- BUILD 2026-10-29-1.6.36
 -- Place 75108253383447 · Universe 10767619742
 -- The picture button or RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.35"
+local BUILD = "2026-10-29-1.6.36"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -1179,7 +1179,7 @@ local function clearMaterialFocus(root)
 	state.matFocus = nil
 	state.matUntil = 0
 	releaseMaterialTouch(root, part)
-	if not state.noclip and not state.iqBusy then
+	if not state.noclip and not state.shove and not state.iqBusy then
 		restoreCollide()
 	end
 end
@@ -3758,7 +3758,7 @@ local function onHeartbeat()
 	if state.iqBusy and next(collideSaved) then
 		restoreCollide()
 	end
-	if state.noclip and inPortal() and not state.iqBusy then
+	if (state.noclip or state.shove) and inPortal() and not state.iqBusy then
 		for _, part in ipairs(character:GetDescendants()) do
 			if part:IsA("BasePart") then
 				if collideSaved[part] == nil then
@@ -3807,8 +3807,8 @@ local function onHeartbeat()
 		local limit = state.shoveStuds or 15
 		if limit < 8 then
 			limit = 8
-		elseif limit > 30 then
-			limit = 30
+		elseif limit > 200 then
+			limit = 200
 		end
 		local away = Vector3.zero
 		local closest = limit
@@ -5277,17 +5277,17 @@ function renderPage()
 			renderPage()
 		end)
 		heading(centerHolder, "Space", nextOrder())
-		note(centerHolder, "Keep away steps you back when another player gets inside the range. It pauses during auto kill, fly, and material pickup.", nextOrder())
+		note(centerHolder, "Keep away steps you back when another player gets inside the range, up to 200 studs. While it is on you phase through buildings. The push pauses during auto kill, fly, and material pickup.", nextOrder())
 		toggleRow(centerHolder, "Keep away", nextOrder(), state.shove, function()
 			if state.toggleShove then
 				state.toggleShove()
 			end
 		end)
 		stepRow(centerHolder, "Keep away range", nextOrder(), tostring(state.shoveStuds) .. " studs", function()
-			state.shoveStuds = math.max(8, (state.shoveStuds or 15) - 1)
+			state.shoveStuds = math.max(8, (state.shoveStuds or 15) - 5)
 			renderPage()
 		end, function()
-			state.shoveStuds = math.min(30, (state.shoveStuds or 15) + 1)
+			state.shoveStuds = math.min(200, (state.shoveStuds or 15) + 5)
 			renderPage()
 		end)
 		animatePage()
@@ -5847,6 +5847,9 @@ corner(window, 12)
 				if push then
 					push:Destroy()
 				end
+			end
+			if not state.noclip and not state.iqBusy and not materialHoldActive() then
+				restoreCollide()
 			end
 		end
 		state.justToggled = "Keep away"
