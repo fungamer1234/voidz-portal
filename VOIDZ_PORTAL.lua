@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.15
+-- BUILD 2026-10-29-1.6.16
 -- Place 75108253383447 · Universe 10767619742
 -- RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.15"
+local BUILD = "2026-10-29-1.6.16"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -1192,6 +1192,8 @@ local function revertFeatures()
 	state.locking = false
 	state.killPart = nil
 	state.aimPoint = nil
+	state.aimPart = nil
+	state.killHop = nil
 	state.followId = nil
 	if state.chaseMarker then
 		pcall(function()
@@ -2863,6 +2865,50 @@ local function runCombat(root)
 	end
 	local killPlayers = state.autoKill or (state.autoQuest and state.questKillPlayers)
 	local killNpcs = state.autoQuest and state.questKillNpc
+	if state.autoKill then
+		local part, label = nearestPlayer(root.Position)
+		state.killPart = nil
+		state.aimPoint = nil
+		state.aimPart = nil
+		state.locking = false
+		if not part then
+			state.killFace = nil
+			local picked = selectedPlayer()
+			if not picked or not picked.Character or not picked.Character.Parent then
+				state.killHop = nil
+			end
+			if (state.killSelected or picked) and now > (state.nextKillNote or 0) then
+				state.nextKillNote = now + 4
+				if not picked then
+					pushLog("Pick a player on the right")
+				elseif not picked.Character or not picked.Character.Parent then
+					pushLog(picked.DisplayName .. " is down")
+				end
+			end
+			return
+		end
+		local hopKey = tostring(label) .. (part == state.chaseMarker and ":mark" or ":body")
+		if state.killHop ~= hopKey then
+			state.killHop = hopKey
+			if part == state.chaseMarker and now > (state.nextStream or 0) then
+				state.nextStream = now + 1
+				local streamPos = part.Position
+				task.spawn(function()
+					pcall(function()
+						LocalPlayer:RequestStreamAroundAsync(streamPos)
+					end)
+				end)
+			end
+			placeBehind(root, part, false)
+			state.aimPoint = nil
+			state.aimPart = nil
+			if state.lastTarget ~= label then
+				state.lastTarget = label
+				pushLog("Target " .. tostring(label))
+			end
+		end
+		return
+	end
 	if killPlayers or killNpcs then
 		local part, label = nil, nil
 		if killPlayers then
@@ -4341,7 +4387,7 @@ function renderPage()
 
 	if state.page == "PvP" then
 		heading(centerHolder, "Combat", nextOrder())
-		note(centerHolder, "Teleports to the player wherever they are, stays a short distance behind them, and fires the weapon you have out. A selected player is the only target.", nextOrder())
+		note(centerHolder, "Teleports you to the player once, then lets go. Aim in first person or with the mouse, and shoot. The hub stays clickable.", nextOrder())
 		toggleRow(centerHolder, "Auto kill", nextOrder(), state.autoKill, function()
 			if not state.autoKill and not requireGame() then
 				return
@@ -4350,6 +4396,8 @@ function renderPage()
 			if not state.autoKill then
 				state.killPart = nil
 				state.aimPoint = nil
+				state.aimPart = nil
+				state.killHop = nil
 				state.locking = false
 				releaseKillCamera()
 				local camera = workspace.CurrentCamera
@@ -4985,16 +5033,6 @@ RunService:BindToRenderStep("VOIDZ_PORTAL_STICK", Enum.RenderPriority.Camera.Val
 		local part = other and playerRoot(other)
 		if followRoot and part then
 			placeBehind(followRoot, part, false)
-		end
-	end
-	if state.autoKill then
-		local _, _, preRoot = characterParts()
-		if preRoot then
-			local part = nearestPlayer(preRoot.Position)
-			if part then
-				state.killPart = part
-				state.locking = true
-			end
 		end
 	end
 	if not state.killPart or not state.killPart.Parent then
