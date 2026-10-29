@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.12
+-- BUILD 2026-10-29-1.6.13
 -- Place 75108253383447 · Universe 10767619742
 -- RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.12"
+local BUILD = "2026-10-29-1.6.13"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -462,18 +462,34 @@ local function teleportTo(cf, label)
 end
 
 local playerRoot
+local placeBehind
 
 local function teleportToPlayer(player)
 	if not player then
 		pushLog("Pick a player on the right")
 		return
 	end
-	local root = playerRoot(player)
-	if not root then
+	if not requireGame() then
+		return
+	end
+	local part = playerRoot(player)
+	if not part then
 		pushLog(player.DisplayName .. " has not loaded")
 		return
 	end
-	teleportTo(root.CFrame * CFrame.new(0, 0, 4), "Teleported to " .. player.DisplayName)
+	local _, humanoid, root = characterParts()
+	if not root then
+		pushLog("Nothing to teleport to")
+		return
+	end
+	if humanoid and humanoid.SeatPart then
+		humanoid.Sit = false
+	end
+	state.followId = player.UserId
+	state.portalUntil = os.clock() + 1.4
+	state.portalCf = nil
+	placeBehind(root, part, false)
+	pushLog("Teleported to " .. player.DisplayName)
 end
 
 local function selectedPlayer()
@@ -1218,47 +1234,66 @@ local function bodyPart(model)
 	if model:IsA("BasePart") then
 		return model
 	end
+	for _, name in ipairs({ "HumanoidRootPart", "Torso", "UpperTorso", "LowerTorso", "Head" }) do
+		local part = model:FindFirstChild(name)
+		if part and part:IsA("BasePart") then
+			return part
+		end
+	end
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	if humanoid then
 		local ok, root = pcall(function()
 			return humanoid.RootPart
 		end)
-		if ok and root and root:IsA("BasePart") and root.Parent then
+		if ok and root and root:IsA("BasePart") and root.Parent and root.Name ~= "Handle" then
 			return root
 		end
 	end
-	for _, name in ipairs({ "HumanoidRootPart", "Torso", "UpperTorso", "LowerTorso", "Head", "Hitbox" }) do
-		local part = model:FindFirstChild(name, true)
-		if part and part:IsA("BasePart") then
-			return part
+	local best = nil
+	local size = 0
+	local function consider(part)
+		if part:IsA("BasePart") and part.Name ~= "Handle" then
+			local volume = part.Size.X * part.Size.Y * part.Size.Z
+			if volume > size then
+				size = volume
+				best = part
+			end
 		end
 	end
-	local part = model:FindFirstChildWhichIsA("BasePart", true)
-	if part then
-		return part
+	for _, inst in ipairs(model:GetChildren()) do
+		consider(inst)
+	end
+	if best then
+		return best
 	end
 	local ok, list = pcall(function()
 		return model:GetDescendants()
 	end)
 	if ok then
 		for _, inst in ipairs(list) do
-			if inst:IsA("BasePart") then
-				return inst
-			end
+			consider(inst)
 		end
 	end
-	return nil
+	return best
 end
 
 playerRoot = function(player)
 	if not player or player == LocalPlayer then
 		return nil
 	end
+	local function remember(part)
+		if not part or not part.Parent then
+			return nil
+		end
+		state.lastBodies = state.lastBodies or {}
+		state.lastBodies[player.UserId] = { part = part, at = os.clock() }
+		return part
+	end
 	local model = player.Character
 	if model and model.Parent then
 		local part = bodyPart(model)
 		if part then
-			return part
+			return remember(part)
 		end
 	end
 	local now = os.clock()
@@ -1318,7 +1353,11 @@ playerRoot = function(player)
 		part = map[string.lower(player.DisplayName)]
 	end
 	if part and part.Parent then
-		return part
+		return remember(part)
+	end
+	local saved = state.lastBodies and state.lastBodies[player.UserId]
+	if saved and saved.part and saved.part.Parent and os.clock() - saved.at < 1.25 then
+		return saved.part
 	end
 	return nil
 end
@@ -1468,7 +1507,14 @@ local function clickAttack()
 	local x, y = 80, 28
 	if camera then
 		x = math.max(20, camera.ViewportSize.X * 0.5)
-		y = 28
+		y = math.max(20, camera.ViewportSize.Y * 0.5)
+		if state.aimPoint then
+			local screen, visible = camera:WorldToViewportPoint(state.aimPoint)
+			if visible and screen.Z > 0 then
+				x = screen.X
+				y = screen.Y
+			end
+		end
 	end
 	if window and window.Visible then
 		local origin = window.AbsolutePosition
@@ -1527,19 +1573,47 @@ releaseKillCamera = function()
 	end
 end
 
-local function placeBehind(root, part, aimCamera)
+placeBehind = function(root, part, aimCamera)
+	if not root or not part or not part.Parent then
+		return
+	end
+	local model = part:FindFirstAncestorOfClass("Model")
+	if model then
+		local torso = model:FindFirstChild("HumanoidRootPart") or model:FindFirstChild("Torso") or model:FindFirstChild("UpperTorso")
+		if torso and torso:IsA("BasePart") then
+			part = torso
+		end
+	end
 	local look = part.CFrame.LookVector
 	local flat = Vector3.new(look.X, 0, look.Z)
 	if flat.Magnitude < 0.2 then
-		flat = Vector3.new(0, 0, -1)
+		flat = state.killFace or Vector3.new(0, 0, -1)
 	else
 		flat = flat.Unit
 	end
+	if state.killFace and state.killFace.Magnitude > 0.2 then
+		if state.killFace:Dot(flat) < 0 then
+			flat = state.killFace
+		else
+			flat = state.killFace:Lerp(flat, 0.45)
+			if flat.Magnitude > 0.05 then
+				flat = flat.Unit
+			end
+		end
+	end
+	state.killFace = flat
 	local pos = part.Position - flat * 7 + Vector3.new(0, 2, 0)
-	local model = part.Parent
-	local torso = model and (model:FindFirstChild("UpperTorso") or model:FindFirstChild("Torso") or model:FindFirstChild("Head"))
-	local aim = (torso and torso:IsA("BasePart") and torso.Position) or (part.Position + Vector3.new(0, 1.2, 0))
-	state.aimPoint = aim
+	local aimPart = model and (model:FindFirstChild("UpperTorso") or model:FindFirstChild("Torso") or model:FindFirstChild("Head"))
+	local aim = (aimPart and aimPart:IsA("BasePart") and aimPart.Position) or (part.Position + Vector3.new(0, 1.2, 0))
+	if aimCamera then
+		state.aimPoint = aim
+	elseif not state.autoKill then
+		state.aimPoint = nil
+	end
+	if not state.simSet and type(setsimulationradius) == "function" then
+		state.simSet = true
+		pcall(setsimulationradius, 1000, 1000)
+	end
 	root.CFrame = CFrame.lookAt(pos, aim)
 	pcall(function()
 		root.AssemblyLinearVelocity = Vector3.zero
@@ -2639,10 +2713,15 @@ local function runCombat(root)
 		if not part and killNpcs then
 			part, label = nearestNpc(root.Position)
 		end
+		if not part and state.killPart and state.killPart.Parent and os.clock() < (state.killGrace or 0) then
+			part = state.killPart
+			label = state.killLabel or "target"
+		end
 		if not part then
 			state.locking = false
 			state.killPart = nil
 			state.aimPoint = nil
+			state.killFace = nil
 			local picked = selectedPlayer()
 			if (state.killSelected or picked) and now > (state.nextKillNote or 0) then
 				state.nextKillNote = now + 4
@@ -2658,6 +2737,8 @@ local function runCombat(root)
 		end
 		state.locking = true
 		state.killPart = part
+		state.killLabel = label
+		state.killGrace = os.clock() + 0.8
 		placeBehind(root, part, true)
 		if state.lastTarget ~= label then
 			state.lastTarget = label
@@ -2808,6 +2889,16 @@ local function onHeartbeat()
 		else
 			state.portalCf = nil
 		end
+	elseif state.followId and not state.autoKill then
+		if os.clock() < (state.portalUntil or 0) then
+			local other = Players:GetPlayerByUserId(state.followId)
+			local part = other and playerRoot(other)
+			if part then
+				placeBehind(root, part, false)
+			end
+		else
+			state.followId = nil
+		end
 	end
 	if inPortal() and state.houseCharacter ~= character then
 		state.houseCharacter = character
@@ -2911,15 +3002,30 @@ local function onHeartbeat()
 		cameraNow.CameraType = state.savedCamType
 		state.savedCamType = nil
 	end
-	if state.killPart then
+	local sticking = state.killPart or (state.followId and os.clock() < (state.portalUntil or 0))
+	if sticking then
 		if state.savedRotate == nil then
 			state.savedRotate = humanoid.AutoRotate
 		end
 		humanoid.AutoRotate = false
+		humanoid.PlatformStand = true
+		if window and not state.minimized and not state.hubHeld then
+			state.hubHome = window.Position
+			state.hubHeld = true
+			window.Position = UDim2.new(0.5, 0, 0.16, 0)
+		end
 	else
 		if state.savedRotate ~= nil then
 			humanoid.AutoRotate = state.savedRotate
 			state.savedRotate = nil
+			humanoid.PlatformStand = false
+		end
+		if state.hubHeld and window then
+			if state.hubHome then
+				window.Position = state.hubHome
+			end
+			state.hubHeld = nil
+			state.hubHome = nil
 		end
 		releaseKillCamera()
 	end
@@ -4729,6 +4835,14 @@ RunService:BindToRenderStep("VOIDZ_PORTAL_STICK", Enum.RenderPriority.Camera.Val
 		state.aimPoint = nil
 		return
 	end
+	if state.followId and not state.autoKill and os.clock() < (state.portalUntil or 0) then
+		local other = Players:GetPlayerByUserId(state.followId)
+		local _, _, followRoot = characterParts()
+		local part = other and playerRoot(other)
+		if followRoot and part then
+			placeBehind(followRoot, part, false)
+		end
+	end
 	if state.autoKill then
 		local _, _, preRoot = characterParts()
 		if preRoot then
@@ -4749,7 +4863,7 @@ RunService:BindToRenderStep("VOIDZ_PORTAL_STICK", Enum.RenderPriority.Camera.Val
 		end
 		if stickHumanoid then
 			stickHumanoid.AutoRotate = false
-			stickHumanoid.PlatformStand = false
+			stickHumanoid.PlatformStand = true
 		end
 		placeBehind(stickRoot, state.killPart, true)
 		if os.clock() >= (state.nextHit or 0) then
