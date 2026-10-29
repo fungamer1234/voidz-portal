@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.16
+-- BUILD 2026-10-29-1.6.17
 -- Place 75108253383447 · Universe 10767619742
 -- RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.16"
+local BUILD = "2026-10-29-1.6.17"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -78,6 +78,7 @@ local state = {
 	fullbright = false,
 	autoRegen = false,
 	autoKill = false,
+	autoFire = false,
 	autoEscape = false,
 	autoHome = false,
 	homeAt = 30,
@@ -1171,6 +1172,7 @@ local function revertFeatures()
 	state.fullbright = false
 	state.autoRegen = false
 	state.autoKill = false
+	state.autoFire = false
 	state.autoEscape = false
 	state.autoHome = false
 	state.fleeing = false
@@ -1584,14 +1586,25 @@ local function clickAttack()
 	state.gunDown = true
 	state.shotToken = (state.shotToken or 0) + 1
 	local token = state.shotToken
-	pcall(function()
-		VirtualInputManager:SendMouseMoveEvent(x, y, game)
-		VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 0)
-	end)
-	if type(mousemoveabs) == "function" then
-		pcall(mousemoveabs, x, y)
+	local overHub = false
+	if window and window.Visible then
+		local origin = window.AbsolutePosition
+		local area = window.AbsoluteSize
+		local pointer = UserInputService:GetMouseLocation()
+		overHub = pointer.X >= origin.X and pointer.X <= origin.X + area.X and pointer.Y >= origin.Y and pointer.Y <= origin.Y + area.Y
 	end
-	if type(mouse1press) == "function" then
+	local onHub = false
+	if window and window.Visible then
+		local origin = window.AbsolutePosition
+		local area = window.AbsoluteSize
+		onHub = x >= origin.X and x <= origin.X + area.X and y >= origin.Y and y <= origin.Y + area.Y
+	end
+	if not onHub then
+		pcall(function()
+			VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 0)
+		end)
+	end
+	if not overHub and type(mouse1press) == "function" then
 		pcall(mouse1press)
 	end
 	local mouse = LocalPlayer:GetMouse()
@@ -1734,10 +1747,10 @@ placeBehind = function(root, part, aimCamera)
 		aimPart = nil
 	end
 	local aim = (aimPart and aimPart.Position) or (part.Position + Vector3.new(0, 1.2, 0))
-	if aimCamera then
+	if aimCamera or (state.autoKill and state.autoFire) then
 		state.aimPoint = aim
 		state.aimPart = aimPart
-	elseif not state.autoKill then
+	else
 		state.aimPoint = nil
 		state.aimPart = nil
 	end
@@ -1745,12 +1758,30 @@ placeBehind = function(root, part, aimCamera)
 		state.simSet = true
 		pcall(setsimulationradius, 1000, 1000)
 	end
-	root.CFrame = CFrame.lookAt(pos, aim)
+	if state.autoKill and not aimCamera and not state.autoFire then
+		root.CFrame = CFrame.new(pos) * (root.CFrame - root.CFrame.Position)
+	else
+		root.CFrame = CFrame.lookAt(pos, aim)
+	end
 	pcall(function()
 		root.AssemblyLinearVelocity = Vector3.zero
 		root.AssemblyAngularVelocity = Vector3.zero
 	end)
-	if aimCamera and not state.fleeing then
+	if state.autoKill and not aimCamera and not state.fleeing then
+		local character = root.Parent
+		if character then
+			state.querySaved = state.querySaved or {}
+			for _, inst in ipairs(character:GetDescendants()) do
+				if inst:IsA("BasePart") then
+					if state.querySaved[inst] == nil then
+						state.querySaved[inst] = inst.CanQuery
+					end
+					inst.CanQuery = false
+				end
+			end
+		end
+	end
+	if (aimCamera or state.autoKill) and not state.fleeing then
 		local killHold = root:FindFirstChild("VOIDZ_KillHold")
 		if not killHold then
 			killHold = Instance.new("BodyPosition")
@@ -2866,17 +2897,25 @@ local function runCombat(root)
 	local killPlayers = state.autoKill or (state.autoQuest and state.questKillPlayers)
 	local killNpcs = state.autoQuest and state.questKillNpc
 	if state.autoKill then
+		if state.fleeing then
+			state.locking = false
+			state.killPart = nil
+			state.aimPoint = nil
+			state.aimPart = nil
+			return
+		end
 		local part, label = nearestPlayer(root.Position)
-		state.killPart = nil
-		state.aimPoint = nil
-		state.aimPart = nil
-		state.locking = false
+		if not part and state.killPart and state.killPart.Parent and os.clock() < (state.killGrace or 0) then
+			part = state.killPart
+			label = state.killLabel or "target"
+		end
 		if not part then
+			state.locking = false
+			state.killPart = nil
+			state.aimPoint = nil
+			state.aimPart = nil
 			state.killFace = nil
 			local picked = selectedPlayer()
-			if not picked or not picked.Character or not picked.Character.Parent then
-				state.killHop = nil
-			end
 			if (state.killSelected or picked) and now > (state.nextKillNote or 0) then
 				state.nextKillNote = now + 4
 				if not picked then
@@ -2887,25 +2926,23 @@ local function runCombat(root)
 			end
 			return
 		end
-		local hopKey = tostring(label) .. (part == state.chaseMarker and ":mark" or ":body")
-		if state.killHop ~= hopKey then
-			state.killHop = hopKey
-			if part == state.chaseMarker and now > (state.nextStream or 0) then
-				state.nextStream = now + 1
-				local streamPos = part.Position
-				task.spawn(function()
-					pcall(function()
-						LocalPlayer:RequestStreamAroundAsync(streamPos)
-					end)
+		state.locking = true
+		state.killPart = part
+		state.killLabel = label
+		state.killGrace = os.clock() + 0.8
+		if part == state.chaseMarker and now > (state.nextStream or 0) then
+			state.nextStream = now + 1
+			local streamPos = part.Position
+			task.spawn(function()
+				pcall(function()
+					LocalPlayer:RequestStreamAroundAsync(streamPos)
 				end)
-			end
-			placeBehind(root, part, false)
-			state.aimPoint = nil
-			state.aimPart = nil
-			if state.lastTarget ~= label then
-				state.lastTarget = label
-				pushLog("Target " .. tostring(label))
-			end
+			end)
+		end
+		placeBehind(root, part, false)
+		if state.lastTarget ~= label then
+			state.lastTarget = label
+			pushLog("Target " .. tostring(label))
 		end
 		return
 	end
@@ -3152,7 +3189,7 @@ local function onHeartbeat()
 	if materialHoldActive() then
 		state.locking = true
 	end
-	if state.fly and inPortal() and not state.iqBusy and not state.killPart and not state.fleeing and not materialHoldActive() then
+	if state.fly and inPortal() and not state.iqBusy and not state.killPart and not state.autoKill and not state.fleeing and not materialHoldActive() then
 		local gyro, velocity = ensureFly(root)
 		local camera = workspace.CurrentCamera
 		if gyro and camera then
@@ -3218,22 +3255,23 @@ local function onHeartbeat()
 		if state.savedRotate == nil then
 			state.savedRotate = humanoid.AutoRotate
 		end
-		humanoid.AutoRotate = false
-		if state.autoKill then
-			if humanoid.PlatformStand then
-				humanoid.PlatformStand = false
-				pcall(function()
-					humanoid:ChangeState(Enum.HumanoidStateType.Running)
-				end)
-			end
-			if window and window.Active then
-				state.hubActive = true
-				window.Active = false
+		if state.autoKill and not state.autoFire then
+			humanoid.PlatformStand = false
+			if state.savedRotate ~= nil then
+				humanoid.AutoRotate = state.savedRotate
+				state.savedRotate = nil
+			else
+				humanoid.AutoRotate = true
 			end
 		else
-			humanoid.PlatformStand = true
+			humanoid.AutoRotate = false
+			if state.autoKill then
+				humanoid.PlatformStand = false
+			else
+				humanoid.PlatformStand = true
+			end
 		end
-		if window and not state.minimized and not state.hubHeld then
+		if window and not state.autoKill and not state.minimized and not state.hubHeld then
 			state.hubHome = window.Position
 			state.hubHeld = true
 			window.Position = UDim2.new(0.5, 0, 0.16, 0)
@@ -4387,7 +4425,7 @@ function renderPage()
 
 	if state.page == "PvP" then
 		heading(centerHolder, "Combat", nextOrder())
-		note(centerHolder, "Teleports you to the player once, then lets go. Aim in first person or with the mouse, and shoot. The hub stays clickable.", nextOrder())
+		note(centerHolder, "Loops you behind the player until you turn it off. Camera, first person, and the mouse stay yours so you can shoot and click this off. Auto fire shoots for you.", nextOrder())
 		toggleRow(centerHolder, "Auto kill", nextOrder(), state.autoKill, function()
 			if not state.autoKill and not requireGame() then
 				return
@@ -4407,6 +4445,15 @@ function renderPage()
 				end
 			end
 			pushLog(state.autoKill and "Auto kill on" or "Auto kill off")
+			renderPage()
+		end)
+		toggleRow(centerHolder, "Auto fire", nextOrder(), state.autoFire, function()
+			state.autoFire = not state.autoFire
+			if not state.autoFire then
+				state.aimPoint = nil
+				state.aimPart = nil
+			end
+			pushLog(state.autoFire and "Auto fire on" or "Auto fire off")
 			renderPage()
 		end)
 		toggleRow(centerHolder, "Selected player only", nextOrder(), state.killSelected, function()
@@ -5044,15 +5091,18 @@ RunService:BindToRenderStep("VOIDZ_PORTAL_STICK", Enum.RenderPriority.Camera.Val
 			return
 		end
 		if stickHumanoid then
-			stickHumanoid.AutoRotate = false
-			if state.autoKill then
-				stickHumanoid.PlatformStand = false
-			else
-				stickHumanoid.PlatformStand = true
+			stickHumanoid.PlatformStand = not state.autoKill
+			if not (state.autoKill and not state.autoFire) then
+				stickHumanoid.AutoRotate = false
 			end
 		end
-		placeBehind(stickRoot, state.killPart, true)
-		if os.clock() >= (state.nextHit or 0) then
+		placeBehind(stickRoot, state.killPart, not state.autoKill)
+		if state.autoKill then
+			if state.autoFire and os.clock() >= (state.nextHit or 0) then
+				state.nextHit = os.clock() + 0.1
+				clickAttack()
+			end
+		elseif os.clock() >= (state.nextHit or 0) then
 			state.nextHit = os.clock() + 0.1
 			clickAttack()
 		end
