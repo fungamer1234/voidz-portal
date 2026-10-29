@@ -4,7 +4,7 @@
 loadstring(game:HttpGet("https://raw.githubusercontent.com/fungamer1234/voidz-portal/main/VOIDZ_PORTAL.lua", true))()
 ```
 
-Build `2026-10-29-1.6.30`
+Build `2026-10-29-1.6.31`
 
 Game: [Portal Sandbox](https://www.roblox.com/games/75108253383447/Portal-Sandbox). PlaceId `75108253383447`.
 
@@ -18,7 +18,7 @@ A copy of the same file is at `Documents/MacsploitUI/scripts/VOIDZ_PORTAL.lua` i
 
 ## Tabs
 
-Home lists every tab and the activity log. Click a row to open that tab. The open tab is marked in green. A round portal sits in the bottom-left corner. The intro loops, and closing the hub pauses it where it is so opening continues from that spot. The picture, button image, and intro are loaded from `Documents/Macsploit Workspace/voidz-portal/`.
+Home lists every tab and the activity log. Click a row to open that tab. The open tab is marked in green. A round portal sits in the bottom-left corner. The theme song loops, and closing the hub pauses it where it is so opening continues from that spot. Settings has Soulja Boy theme. That choice is saved in the MacSploit workspace and comes back the next time you execute. The picture, button image, intro, and Soulja Boy song are loaded from `Documents/Macsploit Workspace/voidz-portal/`.
 
 - **Move.** Fly, noclip, walk speed, infinite jump, click teleport, and anti void. Walk speed moves you at the number you set, because the game was ignoring the normal walk value. It stays off while fly, auto kill, a teleport, or a mech grab is active.
 - **Teleport.** Home base is the house you spawned at. You can also save a mark, jump forward, jump up, jump to a random nearby spot, or teleport to the selected player or a random player. These stay in the current world.

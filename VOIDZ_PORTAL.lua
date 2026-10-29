@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.30
+-- BUILD 2026-10-29-1.6.31
 -- Place 75108253383447 · Universe 10767619742
 -- The picture button or RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.30"
+local BUILD = "2026-10-29-1.6.31"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -105,6 +105,7 @@ local state = {
 	autoBuild = false,
 	autoMat = false,
 	zoneMat = false,
+	souljaAudio = false,
 	material = nil,
 	matOpen = false,
 	matList = {},
@@ -5342,6 +5343,26 @@ function renderPage()
 	end
 
 	if state.page == "Settings" then
+		heading(centerHolder, "Theme", nextOrder())
+		note(centerHolder, "Soulja Boy theme uses that Rick and Morty song. The choice is saved and comes back the next time you execute.", nextOrder())
+		toggleRow(centerHolder, "Soulja Boy theme", nextOrder(), state.souljaAudio == true, function()
+			local nextOn = not state.souljaAudio
+			if nextOn and not state.souljaId then
+				pushLog("Soulja Boy track was not found")
+				renderPage()
+				return
+			end
+			if state.saveTheme then
+				state.saveTheme(nextOn)
+			else
+				state.souljaAudio = nextOn
+			end
+			if state.applyTheme then
+				state.applyTheme()
+			end
+			pushLog(state.souljaAudio and "Soulja Boy theme on" or "Intro theme on")
+			renderPage()
+		end)
 		heading(centerHolder, "Session", nextOrder())
 		note(centerHolder, "Unload turns off movement, combat, mech escape, home, and auto collect. It removes ESP, restores lighting and field of view, and deletes this window.", nextOrder())
 		note(centerHolder, "Build " .. BUILD .. ". The picture button and RightShift hide the hub. The chat bar stays available.", nextOrder())
@@ -5436,6 +5457,41 @@ corner(window, 12)
 	local portalId = loadAsset({ "voidz-portal/portal.png", "portal.png" })
 	local toggleId = loadAsset({ "voidz-portal/toggle.jpg", "toggle.jpg" })
 	local introId = loadAsset({ "voidz-portal/intro.mp3", "intro.mp3" })
+	local souljaId = loadAsset({ "voidz-portal/soulja.mp3", "soulja.mp3" })
+	local function savedSoulja()
+		if type(readfile) ~= "function" then
+			return false
+		end
+		local names = { "voidz-portal/theme.txt", "voidz_portal_theme.txt" }
+		for _, name in ipairs(names) do
+			local exists = true
+			if type(isfile) == "function" then
+				exists = false
+				pcall(function()
+					exists = isfile(name)
+				end)
+			end
+			if exists then
+				local ok, body = pcall(readfile, name)
+				if ok and type(body) == "string" and string.find(string.lower(body), "soulja", 1, true) then
+					return true
+				end
+			end
+		end
+		return false
+	end
+	state.souljaAudio = savedSoulja()
+	state.introId = introId
+	state.souljaId = souljaId
+	state.saveTheme = function(on)
+		state.souljaAudio = on == true
+		if type(writefile) ~= "function" then
+			return
+		end
+		local body = state.souljaAudio and "soulja" or "intro"
+		pcall(writefile, "voidz-portal/theme.txt", body)
+		pcall(writefile, "voidz_portal_theme.txt", body)
+	end
 	if portalId then
 		local portal = Instance.new("ImageLabel")
 		portal.Name = "Portal"
@@ -5457,10 +5513,27 @@ corner(window, 12)
 	end
 	local theme = Instance.new("Sound")
 	theme.Name = "VOIDZ_Theme"
-	theme.SoundId = introId or ""
+	theme.SoundId = (state.souljaAudio and souljaId) or introId or ""
 	theme.Volume = 0.7
 	theme.Looped = true
 	theme.Parent = gui
+	state.applyTheme = function()
+		local id = (state.souljaAudio and state.souljaId) or state.introId or ""
+		if id == "" then
+			return false
+		end
+		local open = window.Visible
+		theme:Pause()
+		theme.SoundId = id
+		theme.Looped = true
+		theme.TimePosition = 0
+		state.themeAt = 0
+		if open then
+			theme:Play()
+			theme.TimePosition = 0
+		end
+		return true
+	end
 	local function resumeTheme()
 		if theme.SoundId == "" or theme.IsPlaying then
 			return
