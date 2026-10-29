@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.39
+-- BUILD 2026-10-29-1.6.40
 -- Place 75108253383447 · Universe 10767619742
 -- The picture button or RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.39"
+local BUILD = "2026-10-29-1.6.40"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -3775,7 +3775,7 @@ local function onHeartbeat()
 	if state.iqBusy and next(collideSaved) then
 		restoreCollide()
 	end
-	if (state.noclip or state.shove) and inPortal() and not state.iqBusy then
+	if (state.noclip or state.shove or os.clock() < (state.blinkUntil or 0)) and inPortal() and not state.iqBusy then
 		if state.phaseChar ~= character then
 			if state.phaseConn then
 				state.phaseConn:Disconnect()
@@ -3783,7 +3783,7 @@ local function onHeartbeat()
 			state.phaseChar = character
 			state.phaseScan = 0
 			state.phaseConn = character.DescendantAdded:Connect(function(inst)
-				if not state.alive or state.iqBusy or not (state.noclip or state.shove) then
+				if not state.alive or state.iqBusy or not (state.noclip or state.shove or os.clock() < (state.blinkUntil or 0)) then
 					return
 				end
 				if inst:IsA("BasePart") and inst.CanCollide then
@@ -3812,6 +3812,9 @@ local function onHeartbeat()
 			state.phaseConn = nil
 		end
 		state.phaseChar = nil
+		if not state.noclip and not state.shove and not state.iqBusy and not materialHoldActive() then
+			restoreCollide()
+		end
 	end
 	if materialHoldActive() then
 		state.locking = true
@@ -4053,7 +4056,7 @@ local function onHeartbeat()
 				end
 				return
 			end
-			local away = nil
+			local person = nil
 			local closest = 80
 			for _, player in ipairs(Players:GetPlayers()) do
 				if player ~= LocalPlayer and not sameTeam(player) then
@@ -4063,22 +4066,84 @@ local function onHeartbeat()
 						local dist = flat.Magnitude
 						if dist > 0.4 and dist < closest then
 							closest = dist
-							away = flat.Unit
+							person = part
 						end
 					end
 				end
 			end
-			if not away then
-				local look = fromRoot.CFrame.LookVector
-				local flatLook = Vector3.new(look.X, 0, look.Z)
-				if flatLook.Magnitude < 0.05 then
-					away = Vector3.new(0, 0, 1)
-				else
-					away = -flatLook.Unit
+			local function flatUnit(vector)
+				local flat = Vector3.new(vector.X, 0, vector.Z)
+				if flat.Magnitude < 0.05 then
+					return nil
+				end
+				return flat.Unit
+			end
+			local look = person and flatUnit(person.CFrame.LookVector) or nil
+			if not look and person then
+				look = flatUnit(fromRoot.Position - person.Position)
+			end
+			if not look then
+				look = flatUnit(-fromRoot.CFrame.LookVector) or Vector3.new(0, 0, 1)
+			end
+			local origin = person and person.Position or fromRoot.Position
+			local along = person and (fromRoot.Position - person.Position):Dot(look) or 0
+			local want = 28
+			if along > 0 then
+				want = math.max(want, along + 18)
+			end
+			local cap = 120
+			local startPos = origin + Vector3.new(0, 3, 0)
+			local params = RaycastParams.new()
+			params.FilterType = Enum.RaycastFilterType.Exclude
+			local filter = {}
+			if fromRoot.Parent then
+				table.insert(filter, fromRoot.Parent)
+			end
+			if person and person.Parent then
+				table.insert(filter, person.Parent)
+			end
+			params.FilterDescendantsInstances = filter
+			pcall(function()
+				params.RespectCanCollide = true
+			end)
+			local goal = math.min(cap, want)
+			local traveled = 0
+			local cursor = startPos
+			local guard = 0
+			while guard < 16 and traveled < goal and traveled < cap do
+				guard = guard + 1
+				local remain = goal - traveled
+				if remain < 0.5 then
+					break
+				end
+				local hit = workspace:Raycast(cursor, look * remain, params)
+				if not hit then
+					break
+				end
+				local advance = hit.Distance + 6
+				if advance < 2 then
+					advance = 2
+				end
+				traveled = math.min(cap, traveled + advance)
+				cursor = startPos + look * traveled
+				if traveled + 2 > goal then
+					goal = math.min(cap, traveled + 4)
 				end
 			end
-			local pos = fromRoot.Position + away * 20 + Vector3.new(0, 3, 0)
-			fromRoot.CFrame = CFrame.lookAt(pos, pos + away)
+			local pos = startPos + look * math.max(goal, math.min(cap, want))
+			local character = fromRoot.Parent
+			if character then
+				for _, part in ipairs(character:GetDescendants()) do
+					if part:IsA("BasePart") and part.CanCollide then
+						if collideSaved[part] == nil then
+							collideSaved[part] = true
+						end
+						part.CanCollide = false
+					end
+				end
+				state.phaseScan = 0
+			end
+			fromRoot.CFrame = CFrame.lookAt(pos, pos + look)
 			pcall(function()
 				fromRoot.AssemblyLinearVelocity = Vector3.zero
 				fromRoot.AssemblyAngularVelocity = Vector3.zero
@@ -4090,10 +4155,10 @@ local function onHeartbeat()
 				end
 			end
 			state.blinkCf = fromRoot.CFrame
-			state.blinkUntil = now + 0.45
+			state.blinkUntil = now + 0.7
 			if now >= (state.blinkNoted or 0) then
 				state.blinkNoted = now + 2
-				pushLog("Blinked about 20 feet")
+				pushLog(person and "Blinked in front of them" or "Blinked through")
 			end
 		end
 	end
@@ -5642,7 +5707,7 @@ function renderPage()
 			renderPage()
 		end)
 		heading(centerHolder, "Survival", nextOrder())
-		note(centerHolder, "Mech escape keeps tapping space while a grab or slam is holding you, and stops once you are free. It does not hold jump. Home snaps you to your house the moment health drops under the percent. Blink when hit teleports you about 20 feet away from the nearest player.", nextOrder())
+		note(centerHolder, "Mech escape keeps tapping space while a grab or slam is holding you, and stops once you are free. It does not hold jump. Home snaps you to your house the moment health drops under the percent. Blink when hit teleports you in front of the nearest player, along the way they are facing, and phases through a house in the way.", nextOrder())
 		toggleRow(centerHolder, "Mech escape", nextOrder(), state.autoEscape, function()
 			if not state.autoEscape and not requireGame() then
 				return
