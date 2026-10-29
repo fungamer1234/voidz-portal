@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.19
+-- BUILD 2026-10-29-1.6.20
 -- Place 75108253383447 · Universe 10767619742
 -- RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.19"
+local BUILD = "2026-10-29-1.6.20"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -3123,12 +3123,18 @@ local function mechGrabbed(character, humanoid)
 			if string.find(hay, "scrap", 1, true) or string.find(hay, "material", 1, true) or string.find(hay, "shop", 1, true) then
 				return nil
 			end
+			if string.find(hay, "slam", 1, true)
+				or string.find(hay, "pound", 1, true)
+				or string.find(hay, "smash", 1, true)
+				or string.find(hay, "throw", 1, true)
+				or string.find(hay, "fling", 1, true) then
+				return "slam"
+			end
 			if string.find(hay, "ungrab", 1, true)
 				or string.find(hay, "release", 1, true)
 				or string.find(hay, "detach", 1, true)
 				or string.find(hay, "letgo", 1, true)
 				or string.find(hay, "let go", 1, true)
-				or string.find(hay, "dropped", 1, true)
 				or string.find(hay, "unheld", 1, true)
 				or string.find(hay, "escaped", 1, true) then
 				return "free"
@@ -3155,19 +3161,23 @@ local function mechGrabbed(character, humanoid)
 				return
 			end
 			local kind = kindOf(remote and remote.Name, text, sawFalse)
-			if kind == "free" then
-				if state.mechHeld and os.clock() > (state.escapeNoted or 0) then
-					state.escapeNoted = os.clock() + 2
-					pushLog("Mech let go")
-				end
-				state.mechHeld = false
-				state.mechLoose = nil
-				state.mechSince = nil
-			elseif kind == "grab" then
+			if kind == "slam" or kind == "grab" then
 				if not state.mechHeld then
 					state.mechSince = os.clock()
 				end
 				state.mechHeld = true
+				state.mechLoose = nil
+				state.mechFreeAt = nil
+				if kind == "slam" then
+					state.mechSlam = os.clock()
+				end
+			elseif kind == "free" then
+				if os.clock() < (state.mechSlam or 0) + 2 then
+					state.mechHeld = true
+					state.mechLoose = nil
+				else
+					state.mechFreeAt = os.clock()
+				end
 			end
 		end
 		local function isEvent(inst)
@@ -3230,35 +3240,49 @@ local function mechGrabbed(character, humanoid)
 	if not state.mechHeld then
 		state.mechLoose = nil
 		state.mechSince = nil
+		state.mechFreeAt = nil
 		return false
 	end
-	if humanoid and os.clock() > (state.mechSince or 0) + 1 then
+	if humanoid then
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		local ok, humState = pcall(function()
+			return humanoid:GetState()
+		end)
+		local slammed = ok and (humState == Enum.HumanoidStateType.FallingDown
+			or humState == Enum.HumanoidStateType.Physics
+			or humState == Enum.HumanoidStateType.Ragdoll)
+		local velocity = root and root.AssemblyLinearVelocity
+		if slammed or (velocity and velocity.Y < -50) then
+			state.mechSlam = os.clock()
+			state.mechLoose = nil
+		end
+	end
+	if os.clock() < (state.mechSlam or 0) + 2 then
+		state.mechLoose = nil
+		return true
+	end
+	if humanoid and os.clock() > (state.mechSince or 0) + 0.35 then
 		local root = character and character:FindFirstChild("HumanoidRootPart")
 		local stuck = humanoid.SeatPart or humanoid.PlatformStand or (root and root.Anchored)
-		if not stuck then
-			local ok, humState = pcall(function()
-				return humanoid:GetState()
-			end)
-			local moving = ok and (humState == Enum.HumanoidStateType.Running
-				or humState == Enum.HumanoidStateType.RunningNoPhysics
-				or humState == Enum.HumanoidStateType.Landed
-				or humState == Enum.HumanoidStateType.Jumping
-				or humState == Enum.HumanoidStateType.Freefall)
-			if moving then
-				if not state.mechLoose then
-					state.mechLoose = os.clock()
-				elseif os.clock() - state.mechLoose > 0.45 then
-					state.mechHeld = false
-					state.mechLoose = nil
-					state.mechSince = nil
-					if os.clock() > (state.escapeNoted or 0) then
-						state.escapeNoted = os.clock() + 2
-						pushLog("Mech let go")
-					end
-					return false
-				end
-			else
+		local ok, humState = pcall(function()
+			return humanoid:GetState()
+		end)
+		local grounded = humanoid.FloorMaterial ~= Enum.Material.Air
+		local running = ok and (humState == Enum.HumanoidStateType.Running or humState == Enum.HumanoidStateType.RunningNoPhysics)
+		if not stuck and grounded and running then
+			local need = state.mechFreeAt and 0.2 or 0.7
+			if not state.mechLoose then
+				state.mechLoose = os.clock()
+			elseif os.clock() - state.mechLoose > need then
+				state.mechHeld = false
 				state.mechLoose = nil
+				state.mechSince = nil
+				state.mechFreeAt = nil
+				if os.clock() > (state.escapeNoted or 0) then
+					state.escapeNoted = os.clock() + 2
+					pushLog("Mech let go")
+				end
+				return false
 			end
 		else
 			state.mechLoose = nil
@@ -3480,11 +3504,11 @@ local function onHeartbeat()
 	if state.autoEscape and inPortal() and not UserInputService:GetFocusedTextBox() and mechGrabbed(character, humanoid) then
 		local now = os.clock()
 		if now >= (state.nextEscape or 0) then
-			state.nextEscape = now + 0.07
+			state.nextEscape = now + 0.012
 			pcall(function()
 				VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
 			end)
-			task.delay(0.03, function()
+			task.delay(0.008, function()
 				if not state.alive then
 					return
 				end
@@ -3493,6 +3517,9 @@ local function onHeartbeat()
 				end)
 			end)
 			humanoid.Jump = true
+			pcall(function()
+				humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+			end)
 			if now >= (state.escapeNoted or 0) then
 				state.escapeNoted = now + 3
 				pushLog("Mech grab, spamming space")
@@ -4642,7 +4669,7 @@ function renderPage()
 			renderPage()
 		end)
 		heading(centerHolder, "Survival", nextOrder())
-		note(centerHolder, "Mech escape listens for the game's grab remote, then spams space until that grab ends. Home returns you to your house spawn under the percent you set.", nextOrder())
+		note(centerHolder, "Mech escape spams space as soon as a grab remote hits, and keeps going through a slam until you are free. Home returns you to your house spawn under the percent you set.", nextOrder())
 		toggleRow(centerHolder, "Mech escape", nextOrder(), state.autoEscape, function()
 			if not state.autoEscape and not requireGame() then
 				return
