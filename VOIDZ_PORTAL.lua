@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.26
+-- BUILD 2026-10-29-1.6.27
 -- Place 75108253383447 · Universe 10767619742
 -- RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.26"
+local BUILD = "2026-10-29-1.6.27"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -1092,7 +1092,7 @@ local function fireCollect(inst, root, beginTouch)
 		sendTouch(root, inst, 0)
 	end
 	local tool = inst:IsA("Tool") and inst or (inst.Parent and inst.Parent:IsA("Tool") and inst.Parent)
-	if tool and root and root.Parent then
+	if tool and root and root.Parent and not string.find(string.lower(tool.Name), "portal", 1, true) then
 		local humanoid = root.Parent:FindFirstChildOfClass("Humanoid")
 		if humanoid then
 			pcall(function()
@@ -1216,6 +1216,17 @@ local function revertFeatures()
 	state.zoneKey = nil
 	state.zoneGot = 0
 	state.zoneDone = nil
+	state.zoneParts = nil
+	state.zoneScanAt = 0
+	do
+		local hopMarker = workspace:FindFirstChild("VOIDZ_ZoneHop")
+		if hopMarker then
+			hopMarker:Destroy()
+		end
+		pcall(function()
+			LocalPlayer.ReplicationFocus = nil
+		end)
+	end
 	do
 		local _, _, root = characterParts()
 		if root and state.matFocus then
@@ -2741,7 +2752,136 @@ local function runMaterials(root)
 		state.zoneKey = nil
 		state.zoneGot = 0
 	end
-	local part = nextGroundPart(root.Position)
+	local part = nil
+	if state.zoneMat then
+		part = (function()
+			local listed = state.zoneParts
+			if not listed or now - (state.zoneScanAt or 0) > 1.2 then
+				listed = {}
+				local seen = {}
+				local perZone = {}
+				local function wantPart(candidate)
+					if seen[candidate] or not candidate:IsA("BasePart") or not candidate.Parent then
+						return false
+					end
+					if not materialEligible(candidate) or partMentionsIq(candidate) or wasTried(candidate) then
+						return false
+					end
+					local away = (candidate.Position - root.Position).Magnitude
+					if away ~= away or away > 5000 then
+						return false
+					end
+					local blob = string.lower(candidate.Name .. " " .. candidate.Parent.Name)
+					local model = candidate:FindFirstAncestorOfClass("Model")
+					if model and not Players:GetPlayerFromCharacter(model) then
+						blob = blob .. " " .. string.lower(model.Name)
+					end
+					if string.find(blob, "portal", 1, true) then
+						return false
+					end
+					if state.material then
+						local id = state.material
+						if string.sub(id, 1, 5) == "name:" then
+							if not string.find(blob, string.lower(string.sub(id, 6)), 1, true) then
+								return false
+							end
+						elseif candidate.Material.Name ~= id then
+							return false
+						end
+					end
+					if not (hasPickupSignal(candidate) or not candidate.Anchored) then
+						return false
+					end
+					local zoneName = zoneNameOf(candidate)
+					if state.zoneDone and state.zoneDone[zoneName] then
+						return false
+					end
+					if (perZone[zoneName] or 0) >= 10 then
+						return false
+					end
+					seen[candidate] = true
+					perZone[zoneName] = (perZone[zoneName] or 0) + 1
+					listed[#listed + 1] = candidate
+					return true
+				end
+				for _, child in ipairs(workspace:GetChildren()) do
+					if #listed >= 80 then
+						break
+					end
+					if child:IsA("Folder") or child:IsA("Model") then
+						local inner = 0
+						for _, inst in ipairs(child:GetDescendants()) do
+							inner = inner + 1
+							if inner > 4000 or #listed >= 80 then
+								break
+							end
+							if inst:IsA("BasePart") then
+								wantPart(inst)
+							end
+						end
+					elseif child:IsA("BasePart") then
+						wantPart(child)
+					end
+				end
+				local params = OverlapParams.new()
+				params.MaxParts = 30
+				params.FilterType = Enum.RaycastFilterType.Exclude
+				if root.Parent then
+					params.FilterDescendantsInstances = { root.Parent }
+				end
+				local origin = root.Position
+				for gx = -3, 3 do
+					for gz = -3, 3 do
+						if #listed >= 80 then
+							break
+						end
+						local center = origin + Vector3.new(gx * 220, 40, gz * 220)
+						local ok, hits = pcall(function()
+							return workspace:GetPartBoundsInRadius(center, 150, params)
+						end)
+						if ok and type(hits) == "table" then
+							for _, inst in ipairs(hits) do
+								if inst:IsA("BasePart") then
+									wantPart(inst)
+								end
+							end
+						end
+					end
+				end
+				state.zoneParts = listed
+				state.zoneScanAt = now
+			end
+			local bestHere, bestHereDist = nil, math.huge
+			local bestNext, bestNextDist = nil, math.huge
+			for _, candidate in ipairs(listed) do
+				if candidate.Parent and not wasTried(candidate) then
+					local zoneName = zoneNameOf(candidate)
+					if not (state.zoneDone and state.zoneDone[zoneName]) then
+						local dist = (candidate.Position - root.Position).Magnitude
+						if state.zoneKey and zoneName == state.zoneKey and (state.zoneGot or 0) < 10 then
+							if dist < bestHereDist then
+								bestHereDist = dist
+								bestHere = candidate
+							end
+						elseif dist < bestNextDist then
+							bestNextDist = dist
+							bestNext = candidate
+						end
+					end
+				end
+			end
+			if bestHere and (state.zoneGot or 0) < 10 then
+				return bestHere
+			end
+			if bestNext then
+				state.zoneKey = nil
+				state.zoneGot = 0
+			end
+			return bestNext
+		end)()
+	else
+		part = nextGroundPart(root.Position)
+	end
 	if not part then
 		if state.zoneMat and state.zoneKey then
 			state.zoneDone = state.zoneDone or {}
@@ -2784,6 +2924,54 @@ local function runMaterials(root)
 		state.zoneKey = zoneNameOf(part)
 		state.zoneGot = 0
 		pushLog("Zone " .. state.zoneKey)
+	end
+	if state.zoneMat and (part.Position - root.Position).Magnitude > 12 then
+		local walkPush = root:FindFirstChild("VOIDZ_WalkBV")
+		if walkPush then
+			walkPush:Destroy()
+		end
+		local character = root.Parent
+		if character then
+			local equipped = character:FindFirstChildOfClass("Tool")
+			if equipped and string.find(string.lower(equipped.Name), "portal", 1, true) then
+				local pack = LocalPlayer:FindFirstChildOfClass("Backpack")
+				if pack then
+					equipped.Parent = pack
+				end
+			end
+		end
+		local hopPos = part.Position + Vector3.new(0, math.clamp(part.Size.Y * 0.5 + 3, 3, 8), 0)
+		local marker = workspace:FindFirstChild("VOIDZ_ZoneHop")
+		if not marker then
+			marker = Instance.new("Part")
+			marker.Name = "VOIDZ_ZoneHop"
+			marker.Anchored = true
+			marker.CanCollide = false
+			marker.CanQuery = false
+			marker.CanTouch = false
+			marker.Transparency = 1
+			marker.Size = Vector3.new(1, 1, 1)
+			marker.Parent = workspace
+		end
+		marker.CFrame = CFrame.new(hopPos)
+		pcall(function()
+			LocalPlayer.ReplicationFocus = marker
+		end)
+		pcall(function()
+			root.AssemblyLinearVelocity = Vector3.zero
+			root.AssemblyAngularVelocity = Vector3.zero
+		end)
+		root.CFrame = CFrame.new(hopPos)
+		task.spawn(function()
+			pcall(function()
+				LocalPlayer:RequestStreamAroundAsync(hopPos)
+			end)
+		end)
+		state.zoneScanAt = 0
+		if state.lastZoneHop ~= part then
+			state.lastZoneHop = part
+			pushLog("Zone teleport")
+		end
 	end
 	if state.lastMat ~= part then
 		state.lastMat = part
@@ -4942,7 +5130,7 @@ function renderPage()
 			left = #state.matIndex[state.material]
 		end
 		heading(centerHolder, "Collect", nextOrder())
-		note(centerHolder, "Auto collect stands on the closest scrap, fires the pickup, and stays until the game takes it. Zone route does that in one area, stops at 10, then moves to the next area.", nextOrder())
+		note(centerHolder, "Auto collect stands on the closest scrap, fires the pickup, and stays until the game takes it. Zone route instantly teleports you onto each area, takes 10, then teleports to the next area. It does not use the portal gun.", nextOrder())
 		note(centerHolder, "Selected: " .. chosen .. "  ·  " .. tostring(left) .. " left. Found " .. tostring(#state.matList) .. " types.", nextOrder())
 		actionButton(centerHolder, "Scan materials", nextOrder(), function()
 			if not requireGame() then
@@ -4995,6 +5183,17 @@ function renderPage()
 			state.zoneKey = nil
 			state.zoneGot = 0
 			state.zoneDone = nil
+			state.zoneParts = nil
+			state.zoneScanAt = 0
+			if not state.zoneMat then
+				local hopMarker = workspace:FindFirstChild("VOIDZ_ZoneHop")
+				if hopMarker then
+					hopMarker:Destroy()
+				end
+				pcall(function()
+					LocalPlayer.ReplicationFocus = nil
+				end)
+			end
 			if state.zoneMat then
 				scanMaterials()
 			elseif not state.autoMat then
