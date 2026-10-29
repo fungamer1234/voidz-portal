@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.6
+-- BUILD 2026-10-29-1.6.7
 -- Place 75108253383447 · Universe 10767619742
 -- RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.6"
+local BUILD = "2026-10-29-1.6.7"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -78,6 +78,9 @@ local state = {
 	fullbright = false,
 	autoRegen = false,
 	autoKill = false,
+	autoEscape = false,
+	autoHome = false,
+	homeAt = 30,
 	autoFarm = false,
 	autoQuest = false,
 	autoIq = false,
@@ -116,6 +119,8 @@ local state = {
 	spectating = nil,
 	marks = {},
 	scan = {},
+	worlds = {},
+	worldScanAt = 0,
 	safe = nil,
 	speedApplied = false,
 	minimized = false,
@@ -1131,6 +1136,9 @@ local function revertFeatures()
 	state.fullbright = false
 	state.autoRegen = false
 	state.autoKill = false
+	state.autoEscape = false
+	state.autoHome = false
+	state.fleeing = false
 	state.autoFarm = false
 	state.autoQuest = false
 	state.autoIq = false
@@ -2557,6 +2565,86 @@ local function runCombat(root)
 	strike(root, part)
 end
 
+local function mentionsMech(text)
+	text = string.lower(tostring(text or ""))
+	return string.find(text, "mech", 1, true)
+		or string.find(text, "claw", 1, true)
+		or string.find(text, "grab", 1, true)
+		or hasWord(text, "robot")
+end
+
+local function partBlob(part)
+	local model = part:FindFirstAncestorOfClass("Model")
+	return string.lower(part.Name .. " " .. (model and model.Name or "") .. " " .. (model and model.Parent and model.Parent.Name or ""))
+end
+
+local function mechGrabbed(character, humanoid)
+	local root = character:FindFirstChild("HumanoidRootPart")
+	if root then
+		local ok, parts = pcall(function()
+			return root:GetConnectedParts(true)
+		end)
+		if ok and type(parts) == "table" then
+			for _, part in ipairs(parts) do
+				if part ~= root and not part:IsDescendantOf(character) and mentionsMech(partBlob(part)) then
+					return true
+				end
+			end
+		end
+	end
+	if humanoid and humanoid.SeatPart and not humanoid.SeatPart:IsDescendantOf(character) then
+		local blob = partBlob(humanoid.SeatPart)
+		if mentionsMech(blob) and not mentionsIq(blob) then
+			return true
+		end
+	end
+	if root and humanoid and (humanoid.PlatformStand or root.Anchored) then
+		for _, player in ipairs(Players:GetPlayers()) do
+			if player ~= LocalPlayer and player.Character then
+				local otherRoot = player.Character:FindFirstChild("HumanoidRootPart")
+				if otherRoot and (otherRoot.Position - root.Position).Magnitude < 18 then
+					for _, child in ipairs(player.Character:GetChildren()) do
+						if mentionsMech(child.Name) then
+							return true
+						end
+					end
+				end
+			end
+		end
+	end
+	return false
+end
+
+local function shouldGoHome(humanoid)
+	if not state.autoHome or not state.house or not inPortal() then
+		return false
+	end
+	if not humanoid or humanoid.Health <= 0 or humanoid.MaxHealth <= 0 then
+		return false
+	end
+	return (humanoid.Health / humanoid.MaxHealth) <= (state.homeAt or 30) / 100
+end
+
+local function goHome(root)
+	if not state.house or not root then
+		return
+	end
+	local now = os.clock()
+	if now < (state.nextHome or 0) then
+		return
+	end
+	state.nextHome = now + 0.6
+	root.CFrame = state.house
+	pcall(function()
+		root.AssemblyLinearVelocity = Vector3.zero
+		root.AssemblyAngularVelocity = Vector3.zero
+	end)
+	if now >= (state.homeNoted or 0) then
+		state.homeNoted = now + 4
+		pushLog("Low health, back home")
+	end
+end
+
 local function onHeartbeat()
 	if not state.alive then
 		return
@@ -2564,6 +2652,18 @@ local function onHeartbeat()
 	local character, humanoid, root = characterParts()
 	if not character or not humanoid or not root then
 		return
+	end
+	if inPortal() and state.houseCharacter ~= character then
+		state.houseCharacter = character
+		task.delay(0.4, function()
+			if not state.alive then
+				return
+			end
+			local current, _, currentRoot = characterParts()
+			if current == character and currentRoot then
+				state.house = currentRoot.CFrame
+			end
+		end)
 	end
 	if state.speed and inPortal() then
 		if savedWalk == nil then
@@ -2594,7 +2694,7 @@ local function onHeartbeat()
 	if materialHoldActive() then
 		state.locking = true
 	end
-	if state.fly and inPortal() and not state.iqBusy and not state.killPart and not materialHoldActive() then
+	if state.fly and inPortal() and not state.iqBusy and not state.killPart and not state.fleeing and not materialHoldActive() then
 		local gyro, velocity = ensureFly(root)
 		local camera = workspace.CurrentCamera
 		if gyro and camera then
@@ -2677,6 +2777,34 @@ local function onHeartbeat()
 				placeBuild(state.buildKind or "Pad", root, true)
 			end
 		end
+	end
+	if state.autoEscape and inPortal() and not UserInputService:GetFocusedTextBox() and mechGrabbed(character, humanoid) then
+		local now = os.clock()
+		if now >= (state.nextEscape or 0) then
+			state.nextEscape = now + 0.07
+			pcall(function()
+				VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
+			end)
+			task.delay(0.03, function()
+				if not state.alive then
+					return
+				end
+				pcall(function()
+					VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
+				end)
+			end)
+			humanoid.Jump = true
+			if now >= (state.escapeNoted or 0) then
+				state.escapeNoted = now + 3
+				pushLog("Mech grab, spamming space")
+			end
+		end
+	end
+	if shouldGoHome(humanoid) then
+		goHome(root)
+		state.fleeing = true
+	else
+		state.fleeing = false
 	end
 	if materialHoldActive() then
 		state.locking = true
@@ -2777,6 +2905,186 @@ local function clickGui(button)
 	task.wait(0.05)
 	pcall(function()
 		VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
+	end)
+end
+
+local function cleanLabel(text)
+	text = string.gsub(tostring(text or ""), "^%s+", "")
+	text = string.gsub(text, "%s+$", "")
+	return text
+end
+
+local function isWorldHostName(blob)
+	return string.find(blob, "dimension", 1, true)
+		or string.find(blob, "world", 1, true)
+		or string.find(blob, "realm", 1, true)
+		or string.find(blob, "planet", 1, true)
+		or string.find(blob, "galaxy", 1, true)
+		or string.find(blob, "teleport", 1, true)
+end
+
+local function skippedWorldLabel(blob)
+	if blob == "" or #blob > 42 or #blob < 2 then
+		return true
+	end
+	return string.find(blob, "buy", 1, true)
+		or string.find(blob, "robux", 1, true)
+		or string.find(blob, "shop", 1, true)
+		or string.find(blob, "close", 1, true)
+		or string.find(blob, "cancel", 1, true)
+		or string.find(blob, "code", 1, true)
+		or string.find(blob, "search", 1, true)
+		or blob == "dimensions"
+		or blob == "worlds"
+		or blob == "dimension"
+end
+
+local function buttonLabel(inst)
+	if inst:IsA("TextButton") then
+		local text = cleanLabel(inst.Text)
+		if text ~= "" then
+			return text
+		end
+	end
+	return cleanLabel(inst.Name)
+end
+
+local function ancestorIsWorld(inst)
+	local parent = inst.Parent
+	while parent and parent ~= game do
+		if isWorldHostName(string.lower(parent.Name)) then
+			return true
+		end
+		parent = parent.Parent
+	end
+	return false
+end
+
+local function screenTitleIsWorld(screen)
+	local seen = 0
+	for _, inst in ipairs(screen:GetDescendants()) do
+		seen = seen + 1
+		if seen > 400 then
+			break
+		end
+		if inst:IsA("TextLabel") or inst:IsA("TextButton") then
+			local blob = string.lower(inst.Text or "")
+			if string.find(blob, "dimension", 1, true) or string.find(blob, "worlds", 1, true) or string.find(blob, "select a world", 1, true) then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+local function pushWorld(into, seen, label, kind, inst)
+	local blob = string.lower(label)
+	if skippedWorldLabel(blob) or seen[blob] then
+		return
+	end
+	seen[blob] = true
+	table.insert(into, { label = label, kind = kind, inst = inst })
+end
+
+local function scanWorlds()
+	local into = {}
+	local seen = {}
+	if PlayerGui then
+		for _, screen in ipairs(PlayerGui:GetChildren()) do
+			if screen:IsA("ScreenGui") and screen ~= gui and screen.Enabled then
+				local titled = isWorldHostName(string.lower(screen.Name)) or screenTitleIsWorld(screen)
+				local count = 0
+				for _, inst in ipairs(screen:GetDescendants()) do
+					count = count + 1
+					if count > 800 or #into >= 100 then
+						break
+					end
+					if (inst:IsA("TextButton") or inst:IsA("ImageButton")) and inst.Visible then
+						if titled or ancestorIsWorld(inst) then
+							pushWorld(into, seen, buttonLabel(inst), "gui", inst)
+						end
+					end
+				end
+			end
+		end
+	end
+	local function considerPlace(inst)
+		if #into >= 100 then
+			return
+		end
+		if inst:IsA("Model") and inst:FindFirstChildOfClass("Humanoid") then
+			return
+		end
+		if inst:IsA("Model") or inst:IsA("BasePart") then
+			pushWorld(into, seen, cleanLabel(inst.Name), "part", inst)
+		end
+	end
+	local function walk(folder, depth)
+		if depth > 3 or #into >= 100 then
+			return
+		end
+		for _, child in ipairs(folder:GetChildren()) do
+			local blob = string.lower(child.Name)
+			if isWorldHostName(blob) and (child:IsA("Folder") or child:IsA("Model")) then
+				for _, item in ipairs(child:GetChildren()) do
+					if item:IsA("Folder") then
+						for _, nested in ipairs(item:GetChildren()) do
+							considerPlace(nested)
+						end
+					else
+						considerPlace(item)
+					end
+				end
+			elseif (child:IsA("Folder") or child:IsA("Model")) and not child:FindFirstChildOfClass("Humanoid") then
+				walk(child, depth + 1)
+			end
+		end
+	end
+	walk(workspace, 0)
+	table.sort(into, function(a, b)
+		return string.lower(a.label) < string.lower(b.label)
+	end)
+	state.worlds = into
+	state.worldScanAt = os.clock()
+	return #into
+end
+
+local function pressWorld(entry)
+	if not requireGame() or not entry then
+		return
+	end
+	if entry.kind == "part" then
+		local cf = pivotOf(entry.inst)
+		if cf then
+			teleportTo(cf + Vector3.new(0, 5, 0), entry.label)
+		else
+			pushLog("No part on " .. entry.label)
+		end
+		return
+	end
+	local function activate(button)
+		if not button or not button.Parent then
+			return false
+		end
+		clickGui(button)
+		pushLog(entry.label)
+		return true
+	end
+	if entry.inst and entry.inst.Parent and activate(entry.inst) then
+		return
+	end
+	sendKey(Enum.KeyCode.R, "Dimensions")
+	task.delay(0.45, function()
+		if not state.alive then
+			return
+		end
+		scanWorlds()
+		for _, item in ipairs(state.worlds) do
+			if item.kind == "gui" and string.lower(item.label) == string.lower(entry.label) and activate(item.inst) then
+				return
+			end
+		end
+		pushLog("Could not open " .. entry.label)
 	end)
 end
 
@@ -3198,7 +3506,7 @@ function renderPage()
 	if state.page == "Home" then
 		local where = inPortal() and "Portal Sandbox is loaded." or "This place is not Portal Sandbox. Join the game, then execute again."
 		note(centerHolder, where .. " PlaceId " .. tostring(game.PlaceId) .. ". Build " .. BUILD .. ".", nextOrder())
-		note(centerHolder, "RightShift hides the hub. Materials auto collect picks up parts on the ground. Auto IQ sits in the IQ chair. Auto kill stays behind a player from anywhere.", nextOrder())
+		note(centerHolder, "RightShift hides the hub. Materials auto collect picks up parts on the ground. Auto kill stays behind a player from anywhere. Portals lists worlds you can teleport to.", nextOrder())
 		for _, line in ipairs(logs) do
 			local row = Instance.new("TextLabel")
 			row.BackgroundColor3 = C.card
@@ -3333,6 +3641,30 @@ function renderPage()
 			state.skipTeam = not state.skipTeam
 			renderPage()
 		end)
+		note(centerHolder, "Mech escape spams space while a mech is holding you, which is how you break the grab. Home sends you back to your house spawn when your health drops under the percent you set.", nextOrder())
+		toggleRow(centerHolder, "Mech escape", nextOrder(), state.autoEscape, function()
+			if not state.autoEscape and not requireGame() then
+				return
+			end
+			state.autoEscape = not state.autoEscape
+			pushLog(state.autoEscape and "Mech escape on" or "Mech escape off")
+			renderPage()
+		end)
+		toggleRow(centerHolder, "Home when hurt", nextOrder(), state.autoHome, function()
+			if not state.autoHome and not requireGame() then
+				return
+			end
+			state.autoHome = not state.autoHome
+			pushLog(state.autoHome and ("Home under " .. tostring(state.homeAt) .. "%") or "Home when hurt off")
+			renderPage()
+		end)
+		stepRow(centerHolder, "Go home under", nextOrder(), tostring(state.homeAt) .. "%", function()
+			state.homeAt = math.max(10, (state.homeAt or 30) - 5)
+			renderPage()
+		end, function()
+			state.homeAt = math.min(80, (state.homeAt or 30) + 5)
+			renderPage()
+		end)
 		return
 	end
 
@@ -3397,250 +3729,34 @@ function renderPage()
 		return
 	end
 
-	if state.page == "Farm" then
-		local iqLine = "IQ: " .. tostring(state.iqText)
-		if state.iqSource ~= "" then
-			iqLine = iqLine .. "  ·  " .. state.iqSource
-		end
-		note(centerHolder, iqLine, nextOrder())
-		note(centerHolder, "Auto IQ puts you in the chair that gives IQ and stays there. It does not pick up scrap or shoot. The number above is the IQ stat if the game shows one.", nextOrder())
-		toggleRow(centerHolder, "Auto IQ", nextOrder(), state.autoIq, function()
-			if not state.autoIq and not requireGame() then
-				return
-			end
-			state.autoIq = not state.autoIq
-			if state.autoIq then
-				refreshIq()
-			else
-				state.iqBusy = false
-				state.locking = false
-			end
-			pushLog(state.autoIq and ("Auto IQ on · " .. state.iqText) or "Auto IQ off")
-			renderPage()
-		end)
-		actionButton(centerHolder, "Refresh IQ", nextOrder(), function()
-			refreshIq()
-			if state.iqSource ~= "" then
-				pushLog("IQ " .. state.iqText .. " (" .. state.iqSource .. ")")
-			else
-				pushLog("No IQ stat on the player or HUD")
-			end
-			renderPage()
-		end)
-		note(centerHolder, "Auto quest reads the quest text on screen and does it from anywhere. Kill players keeps you behind a player. Creatures keeps you behind one. Collect or scrap picks up ground materials. Anything else teleports to the closest quest prompt.", nextOrder())
-		toggleRow(centerHolder, "Auto farm", nextOrder(), state.autoFarm, function()
-			if not state.autoFarm and not requireGame() then
-				return
-			end
-			state.autoFarm = not state.autoFarm
-			if not state.autoFarm and not state.autoKill then
-				state.killPart = nil
-				state.aimPoint = nil
-				state.locking = false
-			end
-			pushLog(state.autoFarm and "Auto farm on" or "Auto farm off")
-			renderPage()
-		end)
-		toggleRow(centerHolder, "Farm players too", nextOrder(), state.farmPlayers, function()
-			state.farmPlayers = not state.farmPlayers
-			renderPage()
-		end)
-		toggleRow(centerHolder, "Auto quest", nextOrder(), state.autoQuest, function()
-			if not state.autoQuest and not requireGame() then
-				return
-			end
-			state.autoQuest = not state.autoQuest
-			pushLog(state.autoQuest and "Auto quest on" or "Auto quest off")
-			renderPage()
-		end)
-		toggleRow(centerHolder, "Any nearby prompt", nextOrder(), state.questAny, function()
-			state.questAny = not state.questAny
-			pushLog(state.questAny and "Quest loop accepts any prompt" or "Quest loop uses quest words only")
-			renderPage()
-		end)
-		return
-	end
-
-	if state.page == "Codes" then
-		note(centerHolder, "The shop in the Oct 28 guide has a Codes tab. That video never shows a code string, and a comment on it says the codes were not shown. Redeem all opens that tab, types any codes you paste, and presses claim buttons that are not Robux purchases. It does not call a guessed remote.", nextOrder())
-		local box = Instance.new("TextBox")
-		box.Size = UDim2.new(1, 0, 0, 34)
-		box.BackgroundColor3 = C.card
-		box.BorderSizePixel = 0
-		box.ClearTextOnFocus = false
-		box.Font = Enum.Font.Gotham
-		box.PlaceholderColor3 = C.muted
-		box.PlaceholderText = "Paste codes, separated by spaces"
-		box.Text = state.extraCodes or ""
-		box.TextColor3 = C.text
-		box.TextSize = 14
-		box.TextXAlignment = Enum.TextXAlignment.Left
-		box.LayoutOrder = nextOrder()
-		box.Parent = centerHolder
-		corner(box, 6)
-		local inset = Instance.new("UIPadding")
-		inset.PaddingLeft = UDim.new(0, 8)
-		inset.Parent = box
-		box.FocusLost:Connect(function()
-			state.extraCodes = box.Text
-		end)
-		actionButton(centerHolder, "Redeem all", nextOrder(), function()
-			state.extraCodes = box.Text
-			redeemAll()
-		end)
-		return
-	end
-
-	if state.page == "Build" then
-		note(centerHolder, "Builds a structure at your feet. Portal bay is a floor plus a wall, then selects the portal gun so you can place a portal on that wall. Auto rebuild moves the same structure when you walk past it. Unload removes the parts.", nextOrder())
-		local function buildNow(kind)
-			if not requireGame() then
-				return
-			end
-			local _, _, root = characterParts()
-			placeBuild(kind, root, false)
-		end
-		actionButton(centerHolder, "Pad", nextOrder(), function()
-			buildNow("Pad")
-		end)
-		actionButton(centerHolder, "Stairs", nextOrder(), function()
-			buildNow("Stairs")
-		end)
-		actionButton(centerHolder, "Wall", nextOrder(), function()
-			buildNow("Wall")
-		end)
-		actionButton(centerHolder, "Portal bay", nextOrder(), function()
-			buildNow("Portal bay")
-		end)
-		actionButton(centerHolder, "Bridge", nextOrder(), function()
-			buildNow("Bridge")
-		end)
-		actionButton(centerHolder, "Room", nextOrder(), function()
-			buildNow("Room")
-		end)
-		actionButton(centerHolder, "Ramp", nextOrder(), function()
-			buildNow("Ramp")
-		end)
-		actionButton(centerHolder, "Tower", nextOrder(), function()
-			buildNow("Tower")
-		end)
-		stepRow(centerHolder, "Size", nextOrder(), tostring(state.buildSize), function()
-			state.buildSize = math.max(12, state.buildSize - 4)
-			renderPage()
-		end, function()
-			state.buildSize = math.min(48, state.buildSize + 4)
-			renderPage()
-		end)
-		toggleRow(centerHolder, "Auto rebuild", nextOrder(), state.autoBuild, function()
-			if not state.autoBuild and not requireGame() then
-				return
-			end
-			state.autoBuild = not state.autoBuild
-			if state.autoBuild then
-				local _, _, root = characterParts()
-				placeBuild(state.buildKind or "Pad", root, false)
-			end
-			pushLog(state.autoBuild and "Auto rebuild on" or "Auto rebuild off")
-			renderPage()
-		end)
-		actionButton(centerHolder, "Clear build", nextOrder(), function()
-			clearBuild()
-			state.autoBuild = false
-			pushLog("Build cleared")
-			renderPage()
-		end)
-		return
-	end
-
 	if state.page == "Portals" then
-		note(centerHolder, "These buttons send the same keys the game already uses. Press F before you walk into a portal for Blender Dimension. F after you enter does not follow that order.", nextOrder())
-		for _, item in ipairs(KEYS) do
-			actionButton(centerHolder, item.name .. "   " .. item.label, nextOrder(), function()
-				sendKey(item.code, item.label)
-			end)
+		if os.clock() - (state.worldScanAt or 0) > 2 then
+			scanWorlds()
 		end
-		toggleRow(centerHolder, "Auto regenerate", nextOrder(), state.autoRegen, function()
-			if not state.autoRegen and not requireGame() then
-				return
-			end
-			state.autoRegen = not state.autoRegen
-			pushLog(state.autoRegen and "Auto regen on" or "Auto regen off")
-			renderPage()
-		end)
-		actionButton(centerHolder, "Save mark here", nextOrder(), function()
+		note(centerHolder, "Pick a world. Refresh opens the dimension menu and reads the worlds the game is showing, plus world parts in the map. It teleports only to the one you press. It does not cycle worlds.", nextOrder())
+		note(centerHolder, tostring(#state.worlds) .. " worlds found.", nextOrder())
+		actionButton(centerHolder, "Refresh worlds", nextOrder(), function()
 			if not requireGame() then
 				return
 			end
-			local _, _, root = characterParts()
-			if not root then
-				pushLog("No character")
-				return
-			end
-			if #state.marks >= 6 then
-				table.remove(state.marks, 1)
-			end
-			table.insert(state.marks, { name = "Mark " .. tostring(#state.marks + 1), cf = root.CFrame })
-			pushLog("Saved mark " .. tostring(#state.marks))
-			renderPage()
-		end)
-		for index, mark in ipairs(state.marks) do
-			actionButton(centerHolder, "Go to " .. mark.name, nextOrder(), function()
-				teleportTo(mark.cf + Vector3.new(0, 3, 0), "Returned to " .. mark.name)
-			end)
-		end
-		actionButton(centerHolder, "Scan portal objects", nextOrder(), function()
-			if not requireGame() then
-				return
-			end
-			scanWorld()
-			renderPage()
-		end)
-		for _, inst in ipairs(state.scan) do
-			if inst and inst.Parent then
-				actionButton(centerHolder, "TP  " .. inst.Name, nextOrder(), function()
-					local cf = pivotOf(inst)
-					if cf then
-						teleportTo(cf + Vector3.new(0, 4, 0), "Teleported to " .. inst.Name)
-					else
-						pushLog("No part on " .. inst.Name)
-					end
-				end)
-			end
-		end
-		return
-	end
-
-	if state.page == "Tools" then
-		note(centerHolder, "Tools already in your backpack can be equipped from here. The hub does not create gear the game did not give you.", nextOrder())
-		actionButton(centerHolder, "Refresh tools", nextOrder(), function()
-			renderPage()
-		end)
-		local hints = {
-			{ "Portal gun", { "portal" } },
-			{ "Knife", { "knife" } },
-			{ "Laser or mech", { "laser", "mech", "blaster" } },
-			{ "Robo arms", { "robo", "arm" } },
-		}
-		for _, item in ipairs(hints) do
-			actionButton(centerHolder, "Equip " .. item[1], nextOrder(), function()
-				if not requireGame() then
+			sendKey(Enum.KeyCode.R, "Dimensions")
+			task.delay(0.5, function()
+				if not state.alive then
 					return
 				end
-				local tool = findTool(item[2])
-				if tool then
-					equipTool(tool)
-				else
-					pushLog(item[1] .. " is not in your backpack")
+				local count = scanWorlds()
+				pushLog("Worlds " .. tostring(count))
+				if state.page == "Portals" then
+					renderPage()
 				end
 			end)
+		end)
+		if #state.worlds == 0 then
+			note(centerHolder, "No worlds yet. Press Refresh worlds so the dimension menu can be read.", nextOrder())
 		end
-		local tools = listTools()
-		if #tools == 0 then
-			note(centerHolder, "No tools in your backpack or hands.", nextOrder())
-		end
-		for _, tool in ipairs(tools) do
-			actionButton(centerHolder, tool.Name, nextOrder(), function()
-				equipTool(tool)
+		for _, entry in ipairs(state.worlds) do
+			actionButton(centerHolder, entry.label, nextOrder(), function()
+				pressWorld(entry)
 			end)
 		end
 		return
@@ -3724,7 +3840,7 @@ function renderPage()
 	end
 
 	if state.page == "Settings" then
-		note(centerHolder, "Unload script turns off fly, noclip, speed, jump, teleport, auto regenerate, combat, auto rebuild, and auto collect. It drops held parts, removes built parts and ESP, restores lighting and field of view, and deletes this window.", nextOrder())
+		note(centerHolder, "Unload script turns off fly, noclip, speed, jump, teleport, combat, mech escape, home, and auto collect. It removes ESP, restores lighting and field of view, and deletes this window.", nextOrder())
 		note(centerHolder, "Build " .. BUILD .. ". RightShift hides the hub. The chat bar stays available.", nextOrder())
 		actionButton(centerHolder, "Unload script", nextOrder(), function()
 			if type(ENV.VOIDZ_PORTAL_STOP) == "function" then
@@ -3957,7 +4073,7 @@ sideLayout.Padding = UDim.new(0, 4)
 sideLayout.SortOrder = Enum.SortOrder.LayoutOrder
 sideLayout.Parent = sideList
 
-local pages = { "Home", "Move", "Materials", "PvP", "Farm", "Codes", "Build", "Portals", "Tools", "Visuals", "Players", "Settings" }
+local pages = { "Home", "Move", "Materials", "PvP", "Portals", "Visuals", "Players", "Settings" }
 for index, name in ipairs(pages) do
 	local button = Instance.new("TextButton")
 	button.Size = UDim2.new(1, 0, 0, 30)
@@ -4112,7 +4228,7 @@ pcall(function()
 	RunService:UnbindFromRenderStep("VOIDZ_PORTAL_MAT")
 end)
 RunService:BindToRenderStep("VOIDZ_PORTAL_MAT", Enum.RenderPriority.Last.Value, function()
-	if not state.alive or state.killPart or not materialHoldActive() then
+	if not state.alive or state.fleeing or state.killPart or not materialHoldActive() then
 		return
 	end
 	local _, _, matRoot = characterParts()
@@ -4121,7 +4237,17 @@ RunService:BindToRenderStep("VOIDZ_PORTAL_MAT", Enum.RenderPriority.Last.Value, 
 	end
 end)
 RunService:BindToRenderStep("VOIDZ_PORTAL_STICK", Enum.RenderPriority.Camera.Value + 5, function()
-	if not state.alive or not state.killPart or not state.killPart.Parent then
+	if not state.alive then
+		return
+	end
+	if state.fleeing then
+		local _, homeHumanoid, homeRoot = characterParts()
+		if homeRoot and shouldGoHome(homeHumanoid) then
+			goHome(homeRoot)
+		end
+		return
+	end
+	if not state.killPart or not state.killPart.Parent then
 		return
 	end
 	local ok, err = pcall(function()

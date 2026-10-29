@@ -4,7 +4,7 @@
 loadstring(game:HttpGet("https://raw.githubusercontent.com/fungamer1234/voidz-portal/main/VOIDZ_PORTAL.lua", true))()
 ```
 
-Build `2026-10-29-1.6.6`
+Build `2026-10-29-1.6.7`
 
 Game: [Portal Sandbox](https://www.roblox.com/games/75108253383447/Portal-Sandbox). PlaceId `75108253383447`.
 
@@ -19,17 +19,12 @@ A copy of the same file is at `Documents/MacsploitUI/scripts/VOIDZ_PORTAL.lua` i
 ## What this version does
 
 - Fly, noclip, walk speed, infinite jump, click teleport, and anti-void.
-- Sends the game's own keys: T portal gun, Q knife, E regenerate, F blender (press before you enter a portal), R dimensions, X laser or mech, V robo arms.
-- Auto regenerate sends E when your health is low.
-- Save position marks, and scan objects with portal, dimension, or blender in the name.
-- Equip tools that are already in your backpack.
+- Sends the game's own keys when a feature needs them: T portal gun, Q knife, E regenerate, F blender (press before you enter a portal), R dimensions, X laser or mech, V robo arms.
 - Client-side player highlights, fullbright, and field of view.
 - Player list with teleport and spectate.
-- PvP auto kill stays behind the target in third person and fires only after the camera is aimed at the torso. If a player is selected, it hunts only that player and waits when they die instead of switching to someone else.
-- Materials auto collect stands on ground scrap, fires the pickup, and stays until the game takes it, then moves to the next closest. It skips chairs. Choose a material to grab only that type. Auto IQ still only sits when auto collect is off.
-- Farm → Auto IQ sits you in the chair that gives IQ and stays there. It does not collect scrap or shoot. Auto quest reads the quest text and does it from anywhere: kill players, kill creatures, or collect scrap. There is no quest range.
-- Codes → Redeem all opens the in-game Codes tab, types codes you paste, and presses claim buttons that are not Robux purchases. The Oct 28 guide shows that tab and does not show a code string.
-- Build places a pad, stairs, wall, portal bay, bridge, room, ramp, or tower at your feet. Portal bay also selects the portal gun. Auto rebuild moves that structure when you walk past it. Unload deletes the parts.
+- PvP auto kill stays behind the target in third person and fires only after the camera is aimed at the torso. If a player is selected, it hunts only that player and waits when they die instead of switching to someone else. Mech escape spams space while a mech is holding you. Home when hurt teleports you to your house spawn under the health percent you set.
+- Materials auto collect stands on ground scrap, fires the pickup, and stays until the game takes it, then moves to the next closest. It skips chairs. Choose a material to grab only that type.
+- Portals lists worlds from the dimension menu and from world parts in the map. Press one to teleport there. It does not cycle through worlds.
 - The window opens with a moving purple gradient, a light sweep across the top bar, and short tab and button animations.
 - Settings has Unload script. It turns off every feature the hub enabled, restores your character, camera, lighting, and field of view, and removes the window.
 
