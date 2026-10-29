@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.9
+-- BUILD 2026-10-29-1.6.10
 -- Place 75108253383447 · Universe 10767619742
 -- RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.9"
+local BUILD = "2026-10-29-1.6.10"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -3314,6 +3314,68 @@ local function note(parent, text, order)
 	return label
 end
 
+local function heading(parent, text, order)
+	local label = Instance.new("TextLabel")
+	label.BackgroundTransparency = 1
+	label.Size = UDim2.new(1, 0, 0, 16)
+	label.Font = Enum.Font.GothamBold
+	label.TextSize = 11
+	label.TextColor3 = C.accent
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.TextYAlignment = Enum.TextYAlignment.Bottom
+	label.Text = string.upper(text)
+	label.LayoutOrder = order
+	label.Parent = parent
+	return label
+end
+
+local function guideRow(parent, title, detail, order)
+	local row = Instance.new("TextButton")
+	row.Size = UDim2.new(1, 0, 0, 36)
+	row.BackgroundColor3 = C.card
+	row.AutoButtonColor = false
+	row.Text = ""
+	row.LayoutOrder = order
+	row.Parent = parent
+	corner(row, 8)
+	local name = Instance.new("TextLabel")
+	name.BackgroundTransparency = 1
+	name.Position = UDim2.fromOffset(12, 0)
+	name.Size = UDim2.fromOffset(88, 36)
+	name.Font = Enum.Font.GothamBold
+	name.TextSize = 13
+	name.TextXAlignment = Enum.TextXAlignment.Left
+	name.TextColor3 = C.accent
+	name.Text = title
+	name.Parent = row
+	local detailLabel = Instance.new("TextLabel")
+	detailLabel.BackgroundTransparency = 1
+	detailLabel.Position = UDim2.fromOffset(102, 0)
+	detailLabel.Size = UDim2.new(1, -114, 1, 0)
+	detailLabel.Font = Enum.Font.Gotham
+	detailLabel.TextSize = 12
+	detailLabel.TextXAlignment = Enum.TextXAlignment.Left
+	detailLabel.TextColor3 = C.muted
+	detailLabel.TextTruncate = Enum.TextTruncate.AtEnd
+	detailLabel.Text = detail
+	detailLabel.Parent = row
+	row.MouseEnter:Connect(function()
+		TweenService:Create(row, TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			BackgroundColor3 = C.card2,
+		}):Play()
+	end)
+	row.MouseLeave:Connect(function()
+		TweenService:Create(row, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			BackgroundColor3 = C.card,
+		}):Play()
+	end)
+	row.MouseButton1Click:Connect(function()
+		state.page = title
+		renderPage()
+	end)
+	return row
+end
+
 local function actionButton(parent, text, order, callback, background)
 	local idle = background or C.card
 	local button = Instance.new("TextButton")
@@ -3423,6 +3485,9 @@ local function renderPlayers()
 		return
 	end
 	wipe(playerList)
+	if state.selected == LocalPlayer.UserId then
+		state.selected = nil
+	end
 	local query = string.lower(state.query or "")
 	local people = Players:GetPlayers()
 	table.sort(people, function(a, b)
@@ -3439,7 +3504,8 @@ local function renderPlayers()
 		local blob = string.lower(player.DisplayName .. " " .. player.Name .. " " .. tostring(player.UserId))
 		if query == "" or string.find(blob, query, 1, true) then
 			shown = shown + 1
-			local picked = state.selected == player.UserId
+			local mine = player == LocalPlayer
+			local picked = (not mine) and state.selected == player.UserId
 			local card = Instance.new("TextButton")
 			card.Size = UDim2.new(1, 0, 0, 64)
 			card.BackgroundColor3 = picked and Color3.fromRGB(62, 40, 92) or C.card
@@ -3477,6 +3543,7 @@ local function renderPlayers()
 			name.TextSize = 14
 			name.TextXAlignment = Enum.TextXAlignment.Left
 			name.TextColor3 = picked and C.accent or C.text
+			name.TextTruncate = Enum.TextTruncate.AtEnd
 			name.Text = player.DisplayName
 			name.Parent = card
 			local handle = Instance.new("TextLabel")
@@ -3487,6 +3554,7 @@ local function renderPlayers()
 			handle.TextSize = 12
 			handle.TextXAlignment = Enum.TextXAlignment.Left
 			handle.TextColor3 = C.muted
+			handle.TextTruncate = Enum.TextTruncate.AtEnd
 			handle.Text = "@" .. player.Name
 			handle.Parent = card
 			local userId = Instance.new("TextLabel")
@@ -3508,12 +3576,15 @@ local function renderPlayers()
 			role.TextSize = 11
 			role.TextXAlignment = Enum.TextXAlignment.Center
 			role.TextColor3 = picked and Color3.fromRGB(20, 12, 32) or C.muted
-			role.Text = picked and "SELECTED" or "Select"
+			role.Text = mine and "YOU" or (picked and "SELECTED" or "Select")
 			role.Parent = card
 			corner(role, 6)
 			local userIdValue = player.UserId
 			local displayName = player.DisplayName
 			card.MouseButton1Click:Connect(function()
+				if mine then
+					return
+				end
 				if state.selected == userIdValue then
 					state.selected = nil
 					pushLog("Unselected " .. displayName)
@@ -3535,8 +3606,14 @@ end
 
 local function markNav()
 	for name, button in pairs(navButtons) do
+		local on = name == state.page
+		button.TextColor3 = on and C.accent or C.text
+		local mark = button:FindFirstChild("Mark")
+		if mark then
+			mark.Visible = on
+		end
 		TweenService:Create(button, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-			BackgroundColor3 = (name == state.page) and C.card2 or C.side,
+			BackgroundColor3 = on and C.card2 or C.side,
 		}):Play()
 	end
 end
@@ -3556,7 +3633,17 @@ function renderPage()
 		return
 	end
 	wipe(centerHolder)
-	pageTitle.Text = state.page
+	local hints = {
+		Home = "Overview",
+		Move = "Fly, speed, and travel",
+		PvP = "Kill, escape, and home",
+		Materials = "Ground scrap",
+		Portals = "One world at a time",
+		Visuals = "Client look",
+		Players = "Teleport, spectate, kill",
+		Settings = "Stop or unload",
+	}
+	pageTitle.Text = hints[state.page] or state.page
 	markNav()
 	local order = 0
 	local function nextOrder()
@@ -3566,8 +3653,16 @@ function renderPage()
 
 	if state.page == "Home" then
 		local where = inPortal() and "Portal Sandbox is loaded." or "This place is not Portal Sandbox. Join the game, then execute again."
-		note(centerHolder, where .. " PlaceId " .. tostring(game.PlaceId) .. ". Build " .. BUILD .. ".", nextOrder())
-		note(centerHolder, "RightShift hides the hub. Materials auto collect picks up parts on the ground. Auto kill stays behind a player from anywhere. Portals lists worlds you can teleport to.", nextOrder())
+		note(centerHolder, where .. " Build " .. BUILD .. ". RightShift hides the hub.", nextOrder())
+		heading(centerHolder, "Tabs", nextOrder())
+		guideRow(centerHolder, "Move", "Fly, noclip, speed, jump, click teleport, anti void.", nextOrder())
+		guideRow(centerHolder, "PvP", "Auto kill, mech escape, and home when hurt.", nextOrder())
+		guideRow(centerHolder, "Materials", "Stand on scrap and pick it up.", nextOrder())
+		guideRow(centerHolder, "Portals", "Teleport to one world. No cycle.", nextOrder())
+		guideRow(centerHolder, "Visuals", "ESP, fullbright, and field of view.", nextOrder())
+		guideRow(centerHolder, "Players", "Select someone for teleport, spectate, and kill.", nextOrder())
+		guideRow(centerHolder, "Settings", "Stop features or unload the hub.", nextOrder())
+		heading(centerHolder, "Activity", nextOrder())
 		for _, line in ipairs(logs) do
 			local row = Instance.new("TextLabel")
 			row.BackgroundColor3 = C.card
@@ -3588,7 +3683,8 @@ function renderPage()
 	end
 
 	if state.page == "Move" then
-		note(centerHolder, "Fly uses WASD. Space rises. LeftControl or LeftShift drops. Speed and fly only run inside Portal Sandbox.", nextOrder())
+		heading(centerHolder, "Movement", nextOrder())
+		note(centerHolder, "Fly uses WASD. Space rises. LeftControl or LeftShift drops. These only run inside Portal Sandbox.", nextOrder())
 		toggleRow(centerHolder, "Fly", nextOrder(), state.fly, function()
 			if not state.fly and not requireGame() then
 				return
@@ -3641,6 +3737,7 @@ function renderPage()
 			pushLog(state.infJump and "Infinite jump on" or "Infinite jump off")
 			renderPage()
 		end)
+		heading(centerHolder, "Travel", nextOrder())
 		toggleRow(centerHolder, "Click teleport", nextOrder(), state.clickTp, function()
 			if not state.clickTp and not requireGame() then
 				return
@@ -3673,7 +3770,8 @@ function renderPage()
 	end
 
 	if state.page == "PvP" then
-		note(centerHolder, "Auto kill stays on the target and fires after the camera is aimed, so the shot hits. The camera stays in third person. If you select a player, it only hunts that player and waits when they die. It does not switch to someone else.", nextOrder())
+		heading(centerHolder, "Combat", nextOrder())
+		note(centerHolder, "Stays behind the target in third person and fires after the camera aims. A selected player is the only target, and it waits when they are gone.", nextOrder())
 		toggleRow(centerHolder, "Auto kill", nextOrder(), state.autoKill, function()
 			if not state.autoKill and not requireGame() then
 				return
@@ -3700,9 +3798,11 @@ function renderPage()
 		end)
 		toggleRow(centerHolder, "Skip teammates", nextOrder(), state.skipTeam, function()
 			state.skipTeam = not state.skipTeam
+			pushLog(state.skipTeam and "Skipping teammates" or "Teammates included")
 			renderPage()
 		end)
-		note(centerHolder, "Mech escape spams space while a mech is holding you, which is how you break the grab. Home sends you back to your house spawn when your health drops under the percent you set.", nextOrder())
+		heading(centerHolder, "Survival", nextOrder())
+		note(centerHolder, "Mech escape spams space during a grab. Home returns you to your house spawn under the percent you set.", nextOrder())
 		toggleRow(centerHolder, "Mech escape", nextOrder(), state.autoEscape, function()
 			if not state.autoEscape and not requireGame() then
 				return
@@ -3738,7 +3838,8 @@ function renderPage()
 		if state.material and state.matIndex[state.material] then
 			left = #state.matIndex[state.material]
 		end
-		note(centerHolder, "Auto collect stands on the closest scrap, fires the pickup, and stays until the game takes it. Then it goes to the next one. It skips chairs. Choose a material to grab only that type.", nextOrder())
+		heading(centerHolder, "Collect", nextOrder())
+		note(centerHolder, "Stands on the closest scrap, fires the pickup, and stays until the game takes it. Then it goes to the next one. It skips chairs.", nextOrder())
 		note(centerHolder, "Selected: " .. chosen .. "  ·  " .. tostring(left) .. " left. Found " .. tostring(#state.matList) .. " types.", nextOrder())
 		actionButton(centerHolder, "Scan materials", nextOrder(), function()
 			if not requireGame() then
@@ -3794,7 +3895,8 @@ function renderPage()
 		if os.clock() - (state.worldScanAt or 0) > 2 then
 			scanWorlds()
 		end
-		note(centerHolder, "Pick a world. Refresh opens the dimension menu and reads the worlds the game is showing, plus world parts in the map. It teleports only to the one you press. It does not cycle worlds.", nextOrder())
+		heading(centerHolder, "Worlds", nextOrder())
+		note(centerHolder, "Refresh reads the dimension menu and world parts in the map. Press one world to teleport there. It does not cycle them.", nextOrder())
 		note(centerHolder, tostring(#state.worlds) .. " worlds found.", nextOrder())
 		actionButton(centerHolder, "Refresh worlds", nextOrder(), function()
 			if not requireGame() then
@@ -3824,6 +3926,7 @@ function renderPage()
 	end
 
 	if state.page == "Visuals" then
+		heading(centerHolder, "Client", nextOrder())
 		note(centerHolder, "Highlights and names are drawn on your client. Other players do not see them.", nextOrder())
 		toggleRow(centerHolder, "Player ESP", nextOrder(), state.esp, function()
 			if not state.esp and not requireGame() then
@@ -3869,12 +3972,13 @@ function renderPage()
 	end
 
 	if state.page == "Players" then
+		heading(centerHolder, "Selection", nextOrder())
 		local picked = selectedPlayer()
 		if picked then
-			note(centerHolder, "SELECTED   " .. picked.DisplayName .. "   @" .. picked.Name .. "   " .. tostring(picked.UserId), nextOrder())
-			note(centerHolder, "This player is used for teleport, spectate, and auto kill. Click their card again to unselect.", nextOrder())
+			note(centerHolder, picked.DisplayName .. "   @" .. picked.Name .. "   " .. tostring(picked.UserId), nextOrder())
+			note(centerHolder, "Used for teleport, spectate, and auto kill. Click the purple card again to unselect.", nextOrder())
 		else
-			note(centerHolder, "Nobody selected. Click a player on the right. A selected card turns purple and says SELECTED.", nextOrder())
+			note(centerHolder, "Nobody selected. Click a player on the right. Your own card stays labeled YOU.", nextOrder())
 		end
 		actionButton(centerHolder, picked and ("Teleport to " .. picked.DisplayName) or "Teleport to player", nextOrder(), function()
 			teleportToPlayer(selectedPlayer())
@@ -3909,7 +4013,8 @@ function renderPage()
 	end
 
 	if state.page == "Settings" then
-		note(centerHolder, "Unload script turns off fly, noclip, speed, jump, teleport, combat, mech escape, home, and auto collect. It removes ESP, restores lighting and field of view, and deletes this window.", nextOrder())
+		heading(centerHolder, "Session", nextOrder())
+		note(centerHolder, "Unload turns off movement, combat, mech escape, home, and auto collect. It removes ESP, restores lighting and field of view, and deletes this window.", nextOrder())
 		note(centerHolder, "Build " .. BUILD .. ". RightShift hides the hub. The chat bar stays available.", nextOrder())
 		actionButton(centerHolder, "Unload script", nextOrder(), function()
 			if type(ENV.VOIDZ_PORTAL_STOP) == "function" then
@@ -4065,7 +4170,7 @@ pageTitle.Font = Enum.Font.Gotham
 pageTitle.TextSize = 12
 pageTitle.TextXAlignment = Enum.TextXAlignment.Left
 pageTitle.TextColor3 = C.muted
-pageTitle.Text = "Home"
+pageTitle.Text = "Overview"
 pageTitle.Parent = top
 
 local search = Instance.new("TextBox")
@@ -4142,7 +4247,7 @@ sideLayout.Padding = UDim.new(0, 4)
 sideLayout.SortOrder = Enum.SortOrder.LayoutOrder
 sideLayout.Parent = sideList
 
-local pages = { "Home", "Move", "Materials", "PvP", "Portals", "Visuals", "Players", "Settings" }
+local pages = { "Home", "Move", "PvP", "Materials", "Portals", "Visuals", "Players", "Settings" }
 for index, name in ipairs(pages) do
 	local button = Instance.new("TextButton")
 	button.Size = UDim2.new(1, 0, 0, 30)
@@ -4156,6 +4261,15 @@ for index, name in ipairs(pages) do
 	button.LayoutOrder = index
 	button.Parent = sideList
 	corner(button, 8)
+	local mark = Instance.new("Frame")
+	mark.Name = "Mark"
+	mark.Size = UDim2.new(0, 3, 1, -12)
+	mark.Position = UDim2.fromOffset(0, 6)
+	mark.BackgroundColor3 = C.accent
+	mark.BorderSizePixel = 0
+	mark.Visible = name == "Home"
+	mark.Parent = button
+	corner(mark, 2)
 	navButtons[name] = button
 	button.MouseEnter:Connect(function()
 		if state.page ~= name then
