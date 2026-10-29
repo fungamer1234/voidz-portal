@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.0.0
+-- BUILD 2026-10-29-1.0.1
 -- Place 75108253383447 · Universe 10767619742
 -- RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.0.0"
+local BUILD = "2026-10-29-1.0.1"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -94,6 +94,8 @@ local conns = {}
 local held = {}
 local savedLight = nil
 local savedFov = nil
+local savedWalk = nil
+local collideSaved = {}
 local gui
 local window
 local centerHolder
@@ -500,26 +502,49 @@ local function findTool(hints)
 	return nil
 end
 
-local function restoreCharacter()
-	local character, humanoid, root = characterParts()
-	clearFly(root)
-	if humanoid then
-		if state.speedApplied then
-			humanoid.WalkSpeed = 16
+local function restoreCollide()
+	for part, was in pairs(collideSaved) do
+		if typeof(part) == "Instance" and part.Parent and part:IsA("BasePart") then
+			part.CanCollide = was
 		end
-		humanoid.PlatformStand = false
 	end
-	if character and not state.noclip then
-		for _, part in ipairs(character:GetDescendants()) do
-			if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
-				part.CanCollide = true
+	table.clear(collideSaved)
+end
+
+local function sweepHubObjects()
+	local names = {
+		VOIDZ_HL = true,
+		VOIDZ_TAG = true,
+		VOIDZ_FlyBG = true,
+		VOIDZ_FlyBV = true,
+	}
+	for _, player in ipairs(Players:GetPlayers()) do
+		local character = player.Character
+		if character then
+			for _, inst in ipairs(character:GetDescendants()) do
+				if names[inst.Name] then
+					inst:Destroy()
+				end
 			end
+		end
+	end
+end
+
+local function restoreCharacter()
+	local _, humanoid, root = characterParts()
+	clearFly(root)
+	restoreCollide()
+	if humanoid then
+		humanoid.PlatformStand = false
+		if savedWalk ~= nil then
+			humanoid.WalkSpeed = savedWalk
+			savedWalk = nil
 		end
 	end
 	state.speedApplied = false
 end
 
-local function stopAll()
+local function revertFeatures()
 	state.fly = false
 	state.noclip = false
 	state.speed = false
@@ -530,11 +555,17 @@ local function stopAll()
 	state.fullbright = false
 	state.autoRegen = false
 	state.fovOn = false
+	table.clear(held)
 	clearEsp()
 	setFullbright(false)
 	setFov(false)
 	stopSpectate()
 	restoreCharacter()
+	sweepHubObjects()
+end
+
+local function stopAll()
+	revertFeatures()
 	pushLog("Stopped movement and visuals")
 end
 
@@ -547,15 +578,24 @@ local function onHeartbeat()
 		return
 	end
 	if state.speed and inPortal() then
+		if savedWalk == nil then
+			savedWalk = humanoid.WalkSpeed
+		end
 		humanoid.WalkSpeed = state.walkSpeed
 		state.speedApplied = true
 	elseif state.speedApplied then
-		humanoid.WalkSpeed = 16
+		if savedWalk ~= nil then
+			humanoid.WalkSpeed = savedWalk
+			savedWalk = nil
+		end
 		state.speedApplied = false
 	end
 	if state.noclip and inPortal() then
 		for _, part in ipairs(character:GetDescendants()) do
 			if part:IsA("BasePart") then
+				if collideSaved[part] == nil then
+					collideSaved[part] = part.CanCollide
+				end
 				part.CanCollide = false
 			end
 		end
@@ -656,10 +696,11 @@ local function note(parent, text, order)
 	return label
 end
 
-local function actionButton(parent, text, order, callback)
+local function actionButton(parent, text, order, callback, background)
+	local idle = background or C.card
 	local button = Instance.new("TextButton")
 	button.Size = UDim2.new(1, 0, 0, 34)
-	button.BackgroundColor3 = C.card
+	button.BackgroundColor3 = idle
 	button.AutoButtonColor = false
 	button.Font = Enum.Font.GothamMedium
 	button.TextSize = 14
@@ -672,7 +713,7 @@ local function actionButton(parent, text, order, callback)
 		button.BackgroundColor3 = C.card2
 	end)
 	button.MouseLeave:Connect(function()
-		button.BackgroundColor3 = C.card
+		button.BackgroundColor3 = idle
 	end)
 	button.MouseButton1Click:Connect(function()
 		pcall(callback)
@@ -924,14 +965,7 @@ function renderPage()
 			end
 			state.noclip = not state.noclip
 			if not state.noclip then
-				local character = LocalPlayer.Character
-				if character then
-					for _, part in ipairs(character:GetDescendants()) do
-						if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
-							part.CanCollide = true
-						end
-					end
-				end
+				restoreCollide()
 			end
 			pushLog(state.noclip and "Noclip on" or "Noclip off")
 			renderPage()
@@ -1162,13 +1196,16 @@ function renderPage()
 	end
 
 	if state.page == "Settings" then
-		note(centerHolder, "VOIDZ HUB for Portal Sandbox. RightShift toggles the window. Unload removes the hub from this session.", nextOrder())
-		note(centerHolder, "Build " .. BUILD .. ". The chat bar stays available.", nextOrder())
-		actionButton(centerHolder, "Stop all features", nextOrder(), stopAll)
-		actionButton(centerHolder, "Unload hub", nextOrder(), function()
+		note(centerHolder, "Unload script turns off fly, noclip, speed, infinite jump, click teleport, anti-void, and auto regenerate. It removes ESP, fullbright, and the field-of-view change, puts your camera and character back, and deletes this window.", nextOrder())
+		note(centerHolder, "Build " .. BUILD .. ". RightShift hides the hub. The chat bar stays available.", nextOrder())
+		actionButton(centerHolder, "Unload script", nextOrder(), function()
 			if type(ENV.VOIDZ_PORTAL_STOP) == "function" then
 				ENV.VOIDZ_PORTAL_STOP()
 			end
+		end, Color3.fromRGB(92, 32, 42))
+		actionButton(centerHolder, "Stop features, keep window", nextOrder(), function()
+			stopAll()
+			renderPage()
 		end)
 	end
 end
@@ -1178,31 +1215,26 @@ local function shutdown()
 		return
 	end
 	state.alive = false
-	state.fly = false
-	state.noclip = false
-	state.esp = false
-	state.fullbright = false
-	state.fovOn = false
 	for _, conn in ipairs(conns) do
 		pcall(function()
 			conn:Disconnect()
 		end)
 	end
 	table.clear(conns)
-	clearEsp()
-	setFullbright(false)
-	setFov(false)
-	stopSpectate()
-	clearFly()
-	pcall(restoreCharacter)
+	pcall(revertFeatures)
 	keepChat()
 	if gui then
 		gui:Destroy()
 		gui = nil
 	end
+	local leftover = PlayerGui:FindFirstChild("VOIDZ_PORTAL")
+	if leftover then
+		leftover:Destroy()
+	end
 	if ENV.VOIDZ_PORTAL_STOP == shutdown then
 		ENV.VOIDZ_PORTAL_STOP = nil
 	end
+	ENV.VOIDZ_PORTAL_BUILD = nil
 end
 
 ENV.VOIDZ_PORTAL_STOP = shutdown
@@ -1472,9 +1504,11 @@ bind(RunService.Heartbeat, onHeartbeat)
 bind(Players.PlayerAdded, function(player)
 	pushLog(player.DisplayName .. " joined")
 	renderPlayers()
-	player.CharacterAdded:Connect(function()
+	bind(player.CharacterAdded, function()
 		task.defer(function()
-			applyEsp(player)
+			if state.alive then
+				applyEsp(player)
+			end
 		end)
 	end)
 end)
@@ -1490,6 +1524,9 @@ bind(Players.PlayerRemoving, function(player)
 end)
 bind(LocalPlayer.CharacterAdded, function()
 	task.defer(function()
+		if not state.alive then
+			return
+		end
 		if state.spectating then
 			spectate(state.spectating)
 		end
@@ -1498,9 +1535,11 @@ bind(LocalPlayer.CharacterAdded, function()
 end)
 
 for _, player in ipairs(Players:GetPlayers()) do
-	player.CharacterAdded:Connect(function()
+	bind(player.CharacterAdded, function()
 		task.defer(function()
-			applyEsp(player)
+			if state.alive then
+				applyEsp(player)
+			end
 		end)
 	end)
 end
