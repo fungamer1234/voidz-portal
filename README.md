@@ -4,7 +4,7 @@
 loadstring(game:HttpGet("https://raw.githubusercontent.com/fungamer1234/voidz-portal/main/VOIDZ_PORTAL.lua", true))()
 ```
 
-Build `2026-10-29-1.6.2`
+Build `2026-10-29-1.6.3`
 
 Game: [Portal Sandbox](https://www.roblox.com/games/75108253383447/Portal-Sandbox). PlaceId `75108253383447`.
 
@@ -26,7 +26,7 @@ A copy of the same file is at `Documents/MacsploitUI/scripts/VOIDZ_PORTAL.lua` i
 - Client-side player highlights, fullbright, and field of view.
 - Player list with teleport and spectate.
 - PvP auto kill and auto farm stay behind the target and pull out a blaster, laser, mech, or portal gun. If none is in your backpack, auto kill presses X to take out the mech blaster. Shots aim at the target. The hub does not click its own buttons, so the toggles still turn off.
-- Materials auto collect is the scrap loop. It teleports to a pickup, fires a claim, collect, or pickup prompt, then shoots the nearest creature. It does not need a material selected. Also shoot players is the backup. The material list is only a scan.
+- Materials auto collect teleports to parts on the ground, picks them up, and moves to the next closest. Choose a material in the list to grab only that type. It does not use the IQ chair.
 - Farm → Auto IQ sits you in the chair that gives IQ and stays there. It does not collect scrap or shoot. Auto quest reads the quest text and does it from anywhere: kill players, kill creatures, or collect scrap. There is no quest range.
 - Codes → Redeem all opens the in-game Codes tab, types codes you paste, and presses claim buttons that are not Robux purchases. The Oct 28 guide shows that tab and does not show a code string.
 - Build places a pad, stairs, wall, portal bay, bridge, room, ramp, or tower at your feet. Portal bay also selects the portal gun. Auto rebuild moves that structure when you walk past it. Unload deletes the parts.

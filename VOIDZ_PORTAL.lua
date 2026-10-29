@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.2
+-- BUILD 2026-10-29-1.6.3
 -- Place 75108253383447 · Universe 10767619742
 -- RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.2"
+local BUILD = "2026-10-29-1.6.3"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -1812,6 +1812,89 @@ local function closestScrap(origin)
 	return best, bestPos, bestLabel
 end
 
+local function partMentionsIq(part)
+	if mentionsIq(part.Name) then
+		return true
+	end
+	local model = part:FindFirstAncestorOfClass("Model")
+	if model and mentionsIq(model.Name) then
+		return true
+	end
+	for _, child in ipairs(part:GetChildren()) do
+		if child:IsA("ProximityPrompt") or child:IsA("TextLabel") then
+			local blob = child.Name
+			if child:IsA("ProximityPrompt") then
+				blob = blob .. " " .. child.ActionText .. " " .. child.ObjectText
+			elseif child:IsA("TextLabel") then
+				blob = blob .. " " .. child.Text
+			end
+			if mentionsIq(blob) then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+local function isGroundPart(part)
+	if not materialEligible(part) or partMentionsIq(part) or wasTried(part) then
+		return false
+	end
+	if not part.Anchored then
+		return true
+	end
+	for _, child in ipairs(part:GetChildren()) do
+		if child:IsA("ProximityPrompt") and child.Enabled then
+			local blob = string.lower(child.Name .. " " .. child.ActionText .. " " .. child.ObjectText)
+			local pickup = string.find(blob, "pick", 1, true)
+				or string.find(blob, "collect", 1, true)
+				or string.find(blob, "grab", 1, true)
+				or string.find(blob, "scrap", 1, true)
+				or isScrapName(blob)
+			if pickup and not mentionsIq(blob) then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+local function closestGround(origin)
+	local best = nil
+	local bestDist = math.huge
+	local seen = {}
+	for _, parts in pairs(state.matIndex) do
+		for _, part in ipairs(parts) do
+			if not seen[part] and part.Parent and isGroundPart(part) then
+				seen[part] = true
+				local dist = (part.Position - origin).Magnitude
+				if dist < bestDist then
+					bestDist = dist
+					best = part
+				end
+			end
+		end
+	end
+	return best
+end
+
+local function nextGroundPart(origin)
+	if state.material and state.matIndex[state.material] then
+		for _ = 1, 8 do
+			local part = closestMaterial(origin)
+			if not part then
+				return nil
+			end
+			if not partMentionsIq(part) then
+				return part
+			end
+			state.tried[part] = os.clock()
+		end
+		return nil
+	end
+	return closestGround(origin)
+end
+
 local function runMaterials(root)
 	local scraping = state.autoMat or (state.autoQuest and state.questCollect)
 	if state.iqBusy or not scraping or not inPortal() then
@@ -1824,42 +1907,33 @@ local function runMaterials(root)
 	if now < (state.nextMat or 0) then
 		return
 	end
-	state.nextMat = now + 0.85
-	local inst, pos, label = findIqWorld(root.Position)
-	if not inst then
-		inst, pos, label = closestScrap(root.Position)
+	state.nextMat = now + 0.7
+	if now - (state.matScanAt or 0) > 2 then
+		scanMaterials()
 	end
-	if inst and pos then
-		state.locking = true
-		useIqTarget(inst, root, pos)
-		if state.lastIqTarget ~= label then
-			state.lastIqTarget = label
-			pushLog("Scrap " .. tostring(label))
+	local part = nextGroundPart(root.Position)
+	if not part then
+		state.locking = false
+		if now > (state.nextMatNote or 0) then
+			state.nextMatNote = now + 6
+			if state.material then
+				pushLog("No more " .. prettyMaterial(state.material) .. " on the ground")
+			else
+				pushLog("No ground material")
+			end
 		end
 		return
 	end
-	local nearNpc = nearestNpc(root.Position)
-	if not (nearNpc and (nearNpc.Position - root.Position).Magnitude < 28) then
-		local prompt, claimPos = closestClaim(root.Position)
-		if prompt and claimPos then
-			state.locking = true
-			useIqTarget(prompt, root, claimPos)
-			local claimLabel = prompt.ObjectText ~= "" and prompt.ObjectText or prompt.Name
-			if state.lastIqTarget ~= claimLabel then
-				state.lastIqTarget = claimLabel
-				pushLog("Claim " .. tostring(claimLabel))
-			end
-			return
-		end
+	state.locking = true
+	local label = part.Parent and part.Parent:IsA("Model") and part.Parent.Name or part.Name
+	if state.material then
+		label = prettyMaterial(state.material) .. " " .. label
 	end
-	if now >= (state.nextIqClick or 0) then
-		state.nextIqClick = now + 3
-		local button = pressIqButton()
-		if button and state.lastIqButton ~= button then
-			state.lastIqButton = button
-			pushLog("Scrap button " .. button)
-		end
+	if state.lastMat ~= part then
+		state.lastMat = part
+		pushLog("Material " .. tostring(label))
 	end
+	forcePickup(part, root)
 end
 
 local iqSeat = { at = 0, seat = nil, names = "" }
@@ -2125,8 +2199,7 @@ local function runCombat(root)
 	end
 	state.killPart = nil
 	state.aimPoint = nil
-	local scraping = state.autoMat or (state.autoQuest and state.questCollect)
-	if not scraping and not state.autoFarm then
+	if not state.autoFarm then
 		state.locking = false
 		return
 	end
@@ -2140,18 +2213,11 @@ local function runCombat(root)
 	end
 	state.nextHit = now + 0.32
 	local part, label = nil, nil
-	if scraping then
+	if state.farmPlayers then
+		part, label = nearestPlayer(root.Position)
+	end
+	if not part then
 		part, label = nearestNpc(root.Position)
-		if not part and state.iqKills then
-			part, label = nearestPlayer(root.Position)
-		end
-	else
-		if state.farmPlayers then
-			part, label = nearestPlayer(root.Position)
-		end
-		if not part then
-			part, label = nearestNpc(root.Position)
-		end
 	end
 	if not part then
 		state.locking = false
@@ -2800,7 +2866,7 @@ function renderPage()
 	if state.page == "Home" then
 		local where = inPortal() and "Portal Sandbox is loaded." or "This place is not Portal Sandbox. Join the game, then execute again."
 		note(centerHolder, where .. " PlaceId " .. tostring(game.PlaceId) .. ". Build " .. BUILD .. ".", nextOrder())
-		note(centerHolder, "RightShift hides the hub. Materials auto collect grabs scrap. Auto IQ sits in the IQ chair. Auto kill stays behind a player from anywhere.", nextOrder())
+		note(centerHolder, "RightShift hides the hub. Materials auto collect picks up parts on the ground. Auto IQ sits in the IQ chair. Auto kill stays behind a player from anywhere.", nextOrder())
 		for _, line in ipairs(logs) do
 			local row = Instance.new("TextLabel")
 			row.BackgroundColor3 = C.card
@@ -2946,7 +3012,7 @@ function renderPage()
 		if state.material and state.matIndex[state.material] then
 			left = #state.matIndex[state.material]
 		end
-		note(centerHolder, "Auto collect is the scrap loop. It teleports to a pickup, fires a claim, collect, or pickup prompt, then shoots the nearest creature. It does not need a material selected. The list is only a scan.", nextOrder())
+		note(centerHolder, "Auto collect teleports to materials on the ground, picks them up, then goes to the next closest. Choose one in the list to grab only that type. It does not sit in the IQ chair.", nextOrder())
 		note(centerHolder, "Selected: " .. chosen .. "  ·  " .. tostring(left) .. " left. Found " .. tostring(#state.matList) .. " types.", nextOrder())
 		actionButton(centerHolder, "Scan materials", nextOrder(), function()
 			if not requireGame() then
@@ -2982,14 +3048,11 @@ function renderPage()
 			end
 			state.autoMat = not state.autoMat
 			if state.autoMat then
-				state.locking = true
+				scanMaterials()
+			else
+				state.locking = false
 			end
 			pushLog(state.autoMat and "Auto collect on" or "Auto collect off")
-			renderPage()
-		end)
-		toggleRow(centerHolder, "Also shoot players", nextOrder(), state.iqKills, function()
-			state.iqKills = not state.iqKills
-			pushLog(state.iqKills and "Scrap loop also shoots the nearest player" or "Scrap loop shoots creatures only")
 			renderPage()
 		end)
 		actionButton(centerHolder, "Drop held parts", nextOrder(), function()
@@ -3029,7 +3092,7 @@ function renderPage()
 			end
 			renderPage()
 		end)
-		note(centerHolder, "Auto quest reads the quest text on screen and does it from anywhere. Kill players keeps you behind a player. Creatures keeps you behind one. Collect or scrap runs the scrap loop. Anything else teleports to the closest quest prompt.", nextOrder())
+		note(centerHolder, "Auto quest reads the quest text on screen and does it from anywhere. Kill players keeps you behind a player. Creatures keeps you behind one. Collect or scrap picks up ground materials. Anything else teleports to the closest quest prompt.", nextOrder())
 		toggleRow(centerHolder, "Auto farm", nextOrder(), state.autoFarm, function()
 			if not state.autoFarm and not requireGame() then
 				return
