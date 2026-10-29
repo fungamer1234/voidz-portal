@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.8
+-- BUILD 2026-10-29-1.6.9
 -- Place 75108253383447 · Universe 10767619742
 -- RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.8"
+local BUILD = "2026-10-29-1.6.9"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -445,14 +445,16 @@ local function teleportTo(cf, label)
 	pushLog(label or "Teleported")
 end
 
+local playerRoot
+
 local function teleportToPlayer(player)
 	if not player then
 		pushLog("Pick a player on the right")
 		return
 	end
-	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+	local root = playerRoot(player)
 	if not root then
-		pushLog("That player has no character")
+		pushLog(player.DisplayName .. " has not loaded")
 		return
 	end
 	teleportTo(root.CFrame * CFrame.new(0, 0, 4), "Teleported to " .. player.DisplayName)
@@ -1193,22 +1195,61 @@ local function sameTeam(player)
 	return player.Team == LocalPlayer.Team
 end
 
-local function livingRoot(model)
+local function bodyPart(model)
 	if not model then
 		return nil
 	end
-	local humanoid = model:FindFirstChildOfClass("Humanoid")
-	if not humanoid or humanoid.Health <= 0 then
+	for _, name in ipairs({ "HumanoidRootPart", "Torso", "UpperTorso", "LowerTorso", "Head" }) do
+		local part = model:FindFirstChild(name)
+		if part and part:IsA("BasePart") then
+			return part
+		end
+	end
+	return model:FindFirstChildWhichIsA("BasePart", true)
+end
+
+playerRoot = function(player)
+	if not player then
 		return nil
 	end
-	return model:FindFirstChild("HumanoidRootPart") or model:FindFirstChildWhichIsA("BasePart")
+	local model = player.Character
+	if not model or not model.Parent then
+		local named = workspace:FindFirstChild(player.Name)
+		if named and named:IsA("Model") then
+			model = named
+		end
+	end
+	if not model or not model.Parent then
+		return nil
+	end
+	return bodyPart(model)
+end
+
+local function livingRoot(model)
+	if not model or not model.Parent then
+		return nil
+	end
+	local part = bodyPart(model)
+	if not part then
+		return nil
+	end
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if humanoid and humanoid.MaxHealth > 0 and humanoid.Health <= 0 then
+		local ok, humState = pcall(function()
+			return humanoid:GetState()
+		end)
+		if ok and humState == Enum.HumanoidStateType.Dead then
+			return nil
+		end
+	end
+	return part
 end
 
 local function nearestPlayer(origin)
 	local picked = selectedPlayer()
 	if state.killSelected or picked then
-		if picked and picked ~= LocalPlayer and not sameTeam(picked) then
-			local part = livingRoot(picked.Character)
+		if picked and picked ~= LocalPlayer then
+			local part = playerRoot(picked)
 			if part then
 				return part, picked.DisplayName
 			end
@@ -2509,7 +2550,13 @@ local function runCombat(root)
 			local picked = selectedPlayer()
 			if (state.killSelected or picked) and now > (state.nextKillNote or 0) then
 				state.nextKillNote = now + 4
-				pushLog(picked and (picked.DisplayName .. " is down") or "Pick a player on the right")
+				if not picked then
+					pushLog("Pick a player on the right")
+				elseif picked.Character and picked.Character.Parent then
+					pushLog(picked.DisplayName .. " has not loaded")
+				else
+					pushLog(picked.DisplayName .. " is down")
+				end
 			end
 			return
 		end
