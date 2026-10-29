@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.17
+-- BUILD 2026-10-29-1.6.18
 -- Place 75108253383447 · Universe 10767619742
 -- RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.17"
+local BUILD = "2026-10-29-1.6.18"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -1758,15 +1758,33 @@ placeBehind = function(root, part, aimCamera)
 		state.simSet = true
 		pcall(setsimulationradius, 1000, 1000)
 	end
-	if state.autoKill and not aimCamera and not state.autoFire then
-		root.CFrame = CFrame.new(pos) * (root.CFrame - root.CFrame.Position)
-	else
-		root.CFrame = CFrame.lookAt(pos, aim)
-	end
+	root.CFrame = CFrame.lookAt(pos, aim)
 	pcall(function()
 		root.AssemblyLinearVelocity = Vector3.zero
 		root.AssemblyAngularVelocity = Vector3.zero
 	end)
+	if state.autoKill and not aimCamera then
+		local camera = workspace.CurrentCamera
+		if camera then
+			local back = aim - pos
+			if back.Magnitude < 0.05 then
+				back = flat
+			else
+				back = back.Unit
+			end
+			local zoom = (camera.CFrame.Position - camera.Focus.Position).Magnitude
+			if zoom ~= zoom or zoom > 80 then
+				zoom = 12
+			end
+			local eye
+			if zoom < 1.5 then
+				eye = pos + Vector3.new(0, 1.5, 0)
+			else
+				eye = pos - back * math.clamp(zoom, 2, 20) + Vector3.new(0, 2, 0)
+			end
+			camera.CFrame = CFrame.lookAt(eye, aim)
+		end
+	end
 	if state.autoKill and not aimCamera and not state.fleeing then
 		local character = root.Parent
 		if character then
@@ -3257,12 +3275,7 @@ local function onHeartbeat()
 		end
 		if state.autoKill and not state.autoFire then
 			humanoid.PlatformStand = false
-			if state.savedRotate ~= nil then
-				humanoid.AutoRotate = state.savedRotate
-				state.savedRotate = nil
-			else
-				humanoid.AutoRotate = true
-			end
+			humanoid.AutoRotate = false
 		else
 			humanoid.AutoRotate = false
 			if state.autoKill then
@@ -3271,7 +3284,7 @@ local function onHeartbeat()
 				humanoid.PlatformStand = true
 			end
 		end
-		if window and not state.autoKill and not state.minimized and not state.hubHeld then
+		if window and not state.minimized and not state.hubHeld then
 			state.hubHome = window.Position
 			state.hubHeld = true
 			window.Position = UDim2.new(0.5, 0, 0.16, 0)
@@ -4425,7 +4438,7 @@ function renderPage()
 
 	if state.page == "PvP" then
 		heading(centerHolder, "Combat", nextOrder())
-		note(centerHolder, "Loops you behind the player until you turn it off. Camera, first person, and the mouse stay yours so you can shoot and click this off. Auto fire shoots for you.", nextOrder())
+		note(centerHolder, "Loops you behind the player and turns you to face them until you turn it off. You can still shoot, zoom, and click this off. Auto fire shoots for you.", nextOrder())
 		toggleRow(centerHolder, "Auto kill", nextOrder(), state.autoKill, function()
 			if not state.autoKill and not requireGame() then
 				return
@@ -5092,9 +5105,7 @@ RunService:BindToRenderStep("VOIDZ_PORTAL_STICK", Enum.RenderPriority.Camera.Val
 		end
 		if stickHumanoid then
 			stickHumanoid.PlatformStand = not state.autoKill
-			if not (state.autoKill and not state.autoFire) then
-				stickHumanoid.AutoRotate = false
-			end
+			stickHumanoid.AutoRotate = false
 		end
 		placeBehind(stickRoot, state.killPart, not state.autoKill)
 		if state.autoKill then
