@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.0.1
+-- BUILD 2026-10-29-1.1.0
 -- Place 75108253383447 · Universe 10767619742
 -- RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.0.1"
+local BUILD = "2026-10-29-1.1.0"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -13,6 +13,7 @@ local UserInputService = game:GetService("UserInputService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local Lighting = game:GetService("Lighting")
 local StarterGui = game:GetService("StarterGui")
+local TweenService = game:GetService("TweenService")
 
 local LocalPlayer = Players.LocalPlayer
 if not LocalPlayer then
@@ -76,6 +77,16 @@ local state = {
 	esp = false,
 	fullbright = false,
 	autoRegen = false,
+	autoKill = false,
+	autoFarm = false,
+	autoQuest = false,
+	questAny = false,
+	killSelected = false,
+	skipTeam = true,
+	farmPlayers = true,
+	killRange = 500,
+	questRange = 400,
+	locking = false,
 	fovOn = false,
 	fov = 90,
 	selected = nil,
@@ -554,6 +565,10 @@ local function revertFeatures()
 	state.esp = false
 	state.fullbright = false
 	state.autoRegen = false
+	state.autoKill = false
+	state.autoFarm = false
+	state.autoQuest = false
+	state.locking = false
 	state.fovOn = false
 	table.clear(held)
 	clearEsp()
@@ -566,7 +581,297 @@ end
 
 local function stopAll()
 	revertFeatures()
-	pushLog("Stopped movement and visuals")
+	pushLog("Stopped features")
+end
+
+local function sameTeam(player)
+	if not state.skipTeam then
+		return false
+	end
+	if not player.Team or not LocalPlayer.Team then
+		return false
+	end
+	return player.Team == LocalPlayer.Team
+end
+
+local function livingRoot(model)
+	if not model then
+		return nil
+	end
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if not humanoid or humanoid.Health <= 0 then
+		return nil
+	end
+	if model:FindFirstChildOfClass("ForceField") then
+		return nil
+	end
+	return model:FindFirstChild("HumanoidRootPart") or model:FindFirstChildWhichIsA("BasePart")
+end
+
+local function nearestPlayer(origin)
+	if state.killSelected then
+		local picked = selectedPlayer()
+		if picked and picked ~= LocalPlayer and not sameTeam(picked) then
+			local part = livingRoot(picked.Character)
+			if part then
+				return part, picked.DisplayName
+			end
+		end
+		return nil, nil
+	end
+	local bestPart = nil
+	local bestName = nil
+	local bestDist = state.killRange
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player ~= LocalPlayer and not sameTeam(player) then
+			local part = livingRoot(player.Character)
+			if part then
+				local dist = (part.Position - origin).Magnitude
+				if dist < bestDist then
+					bestDist = dist
+					bestPart = part
+					bestName = player.DisplayName
+				end
+			end
+		end
+	end
+	return bestPart, bestName
+end
+
+local npcCache = { time = 0, part = nil, name = nil }
+
+local function nearestNpc(origin)
+	local now = os.clock()
+	if now - npcCache.time < 0.6 and npcCache.part and npcCache.part.Parent then
+		local model = npcCache.part.Parent
+		if model and livingRoot(model) then
+			return npcCache.part, npcCache.name
+		end
+	end
+	local bestPart = nil
+	local bestName = nil
+	local bestDist = state.killRange
+	local seen = 0
+	local function consider(model)
+		seen = seen + 1
+		if seen > 500 or not model:IsA("Model") or Players:GetPlayerFromCharacter(model) then
+			return
+		end
+		local part = livingRoot(model)
+		if not part then
+			return
+		end
+		local dist = (part.Position - origin).Magnitude
+		if dist < bestDist then
+			bestDist = dist
+			bestPart = part
+			bestName = model.Name
+		end
+	end
+	for _, inst in ipairs(workspace:GetChildren()) do
+		consider(inst)
+		if inst:IsA("Folder") or inst:IsA("Model") then
+			for _, child in ipairs(inst:GetChildren()) do
+				consider(child)
+				if child:IsA("Folder") or child:IsA("Model") then
+					for _, nested in ipairs(child:GetChildren()) do
+						consider(nested)
+					end
+				end
+			end
+		end
+	end
+	npcCache.time = now
+	npcCache.part = bestPart
+	npcCache.name = bestName
+	return bestPart, bestName
+end
+
+local function ensureWeapon()
+	local character = LocalPlayer.Character
+	if character then
+		for _, child in ipairs(character:GetChildren()) do
+			if child:IsA("Tool") then
+				local name = string.lower(child.Name)
+				if string.find(name, "knife", 1, true) or string.find(name, "laser", 1, true) or string.find(name, "mech", 1, true) or string.find(name, "blaster", 1, true) or string.find(name, "robo", 1, true) then
+					return
+				end
+			end
+		end
+	end
+	local tool = findTool({ "knife", "laser", "mech", "blaster", "robo" })
+	local _, humanoid = characterParts()
+	if tool and humanoid then
+		pcall(function()
+			humanoid:EquipTool(tool)
+		end)
+	end
+end
+
+local function clickAttack()
+	if type(mouse1click) == "function" then
+		pcall(mouse1click)
+		return
+	end
+	local camera = workspace.CurrentCamera
+	local viewport = camera and camera.ViewportSize or Vector2.new(960, 540)
+	local x = viewport.X * 0.5
+	local y = viewport.Y * 0.5
+	pcall(function()
+		VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 0)
+	end)
+	task.delay(0.05, function()
+		if not state.alive then
+			return
+		end
+		pcall(function()
+			VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
+		end)
+	end)
+end
+
+local function strike(root, part)
+	local behind = part.Position - part.CFrame.LookVector * 4
+	root.CFrame = CFrame.lookAt(behind, part.Position)
+	local camera = workspace.CurrentCamera
+	if camera then
+		camera.CFrame = CFrame.lookAt(camera.CFrame.Position, part.Position)
+	end
+	ensureWeapon()
+	clickAttack()
+end
+
+local function promptPosition(prompt)
+	local parent = prompt.Parent
+	if not parent then
+		return nil
+	end
+	if parent:IsA("BasePart") then
+		return parent.Position
+	end
+	if parent:IsA("Attachment") then
+		return parent.WorldPosition
+	end
+	if parent:IsA("Model") then
+		local part = parent.PrimaryPart or parent:FindFirstChildWhichIsA("BasePart", true)
+		if part then
+			return part.Position
+		end
+	end
+	return nil
+end
+
+local function promptWanted(prompt)
+	if state.questAny then
+		return true
+	end
+	local parentName = prompt.Parent and prompt.Parent.Name or ""
+	local blob = string.lower(prompt.Name .. " " .. prompt.ActionText .. " " .. prompt.ObjectText .. " " .. parentName)
+	return string.find(blob, "quest", 1, true)
+		or string.find(blob, "bounty", 1, true)
+		or string.find(blob, "reward", 1, true)
+		or string.find(blob, "claim", 1, true)
+		or string.find(blob, "mission", 1, true)
+end
+
+local function firePrompt(prompt)
+	if type(fireproximityprompt) == "function" then
+		local ok = pcall(fireproximityprompt, prompt)
+		if ok then
+			return true
+		end
+	end
+	local ok = pcall(function()
+		prompt:InputHoldBegin()
+		task.delay((prompt.HoldDuration or 0) + 0.05, function()
+			pcall(function()
+				prompt:InputHoldEnd()
+			end)
+		end)
+	end)
+	return ok
+end
+
+local function runQuest(root)
+	local best = nil
+	local bestPos = nil
+	local bestDist = state.questRange
+	local seen = 0
+	for _, inst in ipairs(workspace:GetDescendants()) do
+		seen = seen + 1
+		if seen > 2500 or bestDist < 12 then
+			break
+		end
+		if inst:IsA("ProximityPrompt") and inst.Enabled and promptWanted(inst) then
+			local pos = promptPosition(inst)
+			if pos then
+				local dist = (pos - root.Position).Magnitude
+				if dist < bestDist then
+					bestDist = dist
+					best = inst
+					bestPos = pos
+				end
+			end
+		end
+	end
+	if not best or not bestPos then
+		if os.clock() > (state.nextQuestNote or 0) then
+			state.nextQuestNote = os.clock() + 8
+			pushLog("No quest prompt nearby")
+		end
+		return
+	end
+	root.CFrame = CFrame.new(bestPos + Vector3.new(0, 3, 0))
+	if firePrompt(best) then
+		local label = best.ObjectText ~= "" and best.ObjectText or best.Name
+		if state.lastQuest ~= label then
+			state.lastQuest = label
+			pushLog("Quest " .. label)
+		end
+	end
+end
+
+local function runCombat(root)
+	if not inPortal() then
+		state.locking = false
+		return
+	end
+	local now = os.clock()
+	if state.autoQuest and now >= (state.nextQuest or 0) then
+		state.nextQuest = now + 1.15
+		runQuest(root)
+	end
+	if not state.autoKill and not state.autoFarm then
+		state.locking = false
+		return
+	end
+	if now < (state.nextHit or 0) then
+		return
+	end
+	local _, humanoid = characterParts()
+	if humanoid and humanoid.Health > 0 and humanoid.Health < humanoid.MaxHealth * 0.35 then
+		state.locking = false
+		return
+	end
+	state.nextHit = now + 0.32
+	local part = nil
+	local label = nil
+	if state.autoKill or (state.autoFarm and state.farmPlayers) then
+		part, label = nearestPlayer(root.Position)
+	end
+	if not part and state.autoFarm then
+		part, label = nearestNpc(root.Position)
+	end
+	if not part then
+		state.locking = false
+		return
+	end
+	state.locking = true
+	if state.lastTarget ~= label then
+		state.lastTarget = label
+		pushLog("Target " .. tostring(label))
+	end
+	strike(root, part)
 end
 
 local function onHeartbeat()
@@ -607,7 +912,7 @@ local function onHeartbeat()
 			gyro.CFrame = camera.CFrame
 		end
 		if velocity then
-			velocity.Velocity = flyVector()
+			velocity.Velocity = state.locking and Vector3.zero or flyVector()
 		end
 	else
 		if root:FindFirstChild("VOIDZ_FlyBV") then
@@ -638,6 +943,7 @@ local function onHeartbeat()
 			end
 		end
 	end
+	runCombat(root)
 end
 
 local function bind(signal, fn)
@@ -710,10 +1016,14 @@ local function actionButton(parent, text, order, callback, background)
 	button.Parent = parent
 	corner(button, 8)
 	button.MouseEnter:Connect(function()
-		button.BackgroundColor3 = C.card2
+		TweenService:Create(button, TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			BackgroundColor3 = C.card2,
+		}):Play()
 	end)
 	button.MouseLeave:Connect(function()
-		button.BackgroundColor3 = idle
+		TweenService:Create(button, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			BackgroundColor3 = idle,
+		}):Play()
 	end)
 	button.MouseButton1Click:Connect(function()
 		pcall(callback)
@@ -899,8 +1209,20 @@ end
 
 local function markNav()
 	for name, button in pairs(navButtons) do
-		button.BackgroundColor3 = (name == state.page) and C.card2 or C.side
+		TweenService:Create(button, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			BackgroundColor3 = (name == state.page) and C.card2 or C.side,
+		}):Play()
 	end
+end
+
+local function animatePage()
+	if not centerHolder then
+		return
+	end
+	centerHolder.Position = UDim2.fromOffset(18, 10)
+	TweenService:Create(centerHolder, TweenInfo.new(0.22, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+		Position = UDim2.fromOffset(4, 4),
+	}):Play()
 end
 
 function renderPage()
@@ -919,7 +1241,7 @@ function renderPage()
 	if state.page == "Home" then
 		local where = inPortal() and "Portal Sandbox is loaded." or "This place is not Portal Sandbox. Join the game, then execute again."
 		note(centerHolder, where .. " PlaceId " .. tostring(game.PlaceId) .. ". Build " .. BUILD .. ".", nextOrder())
-		note(centerHolder, "RightShift hides the hub. Pick a player on the right, then use Teleport or Spectate.", nextOrder())
+		note(centerHolder, "RightShift hides the hub. PvP and Farm run the combat loops. Pick a player on the right for a single target.", nextOrder())
 		for _, line in ipairs(logs) do
 			local row = Instance.new("TextLabel")
 			row.BackgroundColor3 = C.card
@@ -1019,6 +1341,72 @@ function renderPage()
 			clearFly()
 			restoreCharacter()
 			pushLog("Movement stopped")
+			renderPage()
+		end)
+		return
+	end
+
+	if state.page == "PvP" then
+		note(centerHolder, "Auto kill teleports behind a living player, aims, equips a knife, laser, or mech if you already have one, and clicks. Kills pay money in this game. It uses your weapons. It does not invent a damage remote.", nextOrder())
+		toggleRow(centerHolder, "Auto kill", nextOrder(), state.autoKill, function()
+			if not state.autoKill and not requireGame() then
+				return
+			end
+			state.autoKill = not state.autoKill
+			pushLog(state.autoKill and "Auto kill on" or "Auto kill off")
+			renderPage()
+		end)
+		toggleRow(centerHolder, "Selected player only", nextOrder(), state.killSelected, function()
+			state.killSelected = not state.killSelected
+			pushLog(state.killSelected and "Kill target is the selected player" or "Kill target is the nearest player")
+			renderPage()
+		end)
+		toggleRow(centerHolder, "Skip teammates", nextOrder(), state.skipTeam, function()
+			state.skipTeam = not state.skipTeam
+			renderPage()
+		end)
+		stepRow(centerHolder, "Search range", nextOrder(), tostring(state.killRange), function()
+			state.killRange = math.max(40, state.killRange - 50)
+			renderPage()
+		end, function()
+			state.killRange = math.min(2000, state.killRange + 50)
+			renderPage()
+		end)
+		return
+	end
+
+	if state.page == "Farm" then
+		note(centerHolder, "Auto farm hunts NPC humanoids, then players if that option is on. Auto quest teleports to a nearby prompt named quest, bounty, reward, claim, or mission and fires it. Bounties were announced as upcoming, so a prompt has to exist in the server.", nextOrder())
+		toggleRow(centerHolder, "Auto farm", nextOrder(), state.autoFarm, function()
+			if not state.autoFarm and not requireGame() then
+				return
+			end
+			state.autoFarm = not state.autoFarm
+			pushLog(state.autoFarm and "Auto farm on" or "Auto farm off")
+			renderPage()
+		end)
+		toggleRow(centerHolder, "Farm players too", nextOrder(), state.farmPlayers, function()
+			state.farmPlayers = not state.farmPlayers
+			renderPage()
+		end)
+		toggleRow(centerHolder, "Auto quest", nextOrder(), state.autoQuest, function()
+			if not state.autoQuest and not requireGame() then
+				return
+			end
+			state.autoQuest = not state.autoQuest
+			pushLog(state.autoQuest and "Auto quest on" or "Auto quest off")
+			renderPage()
+		end)
+		toggleRow(centerHolder, "Any nearby prompt", nextOrder(), state.questAny, function()
+			state.questAny = not state.questAny
+			pushLog(state.questAny and "Quest loop accepts any prompt" or "Quest loop uses quest words only")
+			renderPage()
+		end)
+		stepRow(centerHolder, "Quest range", nextOrder(), tostring(state.questRange), function()
+			state.questRange = math.max(30, state.questRange - 50)
+			renderPage()
+		end, function()
+			state.questRange = math.min(2000, state.questRange + 50)
 			renderPage()
 		end)
 		return
@@ -1196,7 +1584,7 @@ function renderPage()
 	end
 
 	if state.page == "Settings" then
-		note(centerHolder, "Unload script turns off fly, noclip, speed, infinite jump, click teleport, anti-void, and auto regenerate. It removes ESP, fullbright, and the field-of-view change, puts your camera and character back, and deletes this window.", nextOrder())
+		note(centerHolder, "Unload script turns off fly, noclip, speed, infinite jump, click teleport, anti-void, auto regenerate, auto kill, auto farm, and auto quest. It removes ESP, fullbright, and the field-of-view change, puts your camera and character back, and deletes this window.", nextOrder())
 		note(centerHolder, "Build " .. BUILD .. ". RightShift hides the hub. The chat bar stays available.", nextOrder())
 		actionButton(centerHolder, "Unload script", nextOrder(), function()
 			if type(ENV.VOIDZ_PORTAL_STOP) == "function" then
@@ -1208,6 +1596,7 @@ function renderPage()
 			renderPage()
 		end)
 	end
+	animatePage()
 end
 
 local function shutdown()
@@ -1252,22 +1641,41 @@ window = Instance.new("Frame")
 window.Name = "Window"
 window.AnchorPoint = Vector2.new(0.5, 0.5)
 window.Position = UDim2.fromScale(0.5, 0.5)
-window.Size = UDim2.fromOffset(880, 520)
-window.BackgroundColor3 = C.bg
+window.Size = UDim2.fromOffset(760, 440)
+window.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 window.BorderSizePixel = 0
 window.Active = true
 window.ClipsDescendants = true
 window.Parent = gui
 corner(window, 12)
+local wash = Instance.new("UIGradient")
+wash.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(54, 28, 92)),
+	ColorSequenceKeypoint.new(0.42, Color3.fromRGB(14, 12, 20)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(36, 22, 68)),
+})
+wash.Rotation = 28
+wash.Parent = window
 local windowStroke = Instance.new("UIStroke")
-windowStroke.Color = C.line
-windowStroke.Thickness = 1
+windowStroke.Color = C.accent
+windowStroke.Thickness = 1.4
+windowStroke.Transparency = 0.25
 windowStroke.Parent = window
+task.spawn(function()
+	while state.alive and wash.Parent do
+		local wave = os.clock()
+		wash.Rotation = 20 + math.sin(wave * 0.35) * 16
+		wash.Offset = Vector2.new(math.sin(wave * 0.22) * 0.18, math.cos(wave * 0.18) * 0.06)
+		windowStroke.Color = C.line:Lerp(C.accent, 0.35 + math.sin(wave * 1.4) * 0.35)
+		RunService.Heartbeat:Wait()
+	end
+end)
 
 local top = Instance.new("Frame")
 top.Name = "Top"
 top.Size = UDim2.new(1, 0, 0, 52)
 top.BackgroundColor3 = C.bar
+top.BackgroundTransparency = 0.22
 top.BorderSizePixel = 0
 top.Active = true
 top.Parent = window
@@ -1276,8 +1684,38 @@ local topFill = Instance.new("Frame")
 topFill.Size = UDim2.new(1, 0, 0, 16)
 topFill.Position = UDim2.new(0, 0, 1, -16)
 topFill.BackgroundColor3 = C.bar
+topFill.BackgroundTransparency = 0.22
 topFill.BorderSizePixel = 0
 topFill.Parent = top
+local sheen = Instance.new("Frame")
+sheen.Size = UDim2.new(0.28, 0, 1, 0)
+sheen.Position = UDim2.new(-0.4, 0, 0, 0)
+sheen.BackgroundColor3 = Color3.new(1, 1, 1)
+sheen.BackgroundTransparency = 0.86
+sheen.BorderSizePixel = 0
+sheen.ZIndex = 3
+sheen.Parent = top
+local sheenGrad = Instance.new("UIGradient")
+sheenGrad.Transparency = NumberSequence.new({
+	NumberSequenceKeypoint.new(0, 1),
+	NumberSequenceKeypoint.new(0.5, 0.15),
+	NumberSequenceKeypoint.new(1, 1),
+})
+sheenGrad.Parent = sheen
+local function loopSheen()
+	if not state.alive or not sheen.Parent then
+		return
+	end
+	sheen.Position = UDim2.new(-0.45, 0, 0, 0)
+	local glide = TweenService:Create(sheen, TweenInfo.new(2.6, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut), {
+		Position = UDim2.new(1.15, 0, 0, 0),
+	})
+	glide.Completed:Connect(function()
+		task.delay(1.1, loopSheen)
+	end)
+	glide:Play()
+end
+task.defer(loopSheen)
 
 local title = Instance.new("TextLabel")
 title.BackgroundTransparency = 1
@@ -1337,7 +1775,10 @@ end
 
 iconButton("-", -78, function()
 	state.minimized = not state.minimized
-	window.Size = state.minimized and UDim2.fromOffset(880, 52) or UDim2.fromOffset(880, 520)
+	local goal = state.minimized and UDim2.fromOffset(880, 52) or UDim2.fromOffset(880, 520)
+	TweenService:Create(window, TweenInfo.new(0.22, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+		Size = goal,
+	}):Play()
 end)
 iconButton("x", -42, function()
 	shutdown()
@@ -1353,6 +1794,7 @@ body.Parent = window
 local side = Instance.new("Frame")
 side.Size = UDim2.new(0, 168, 1, 0)
 side.BackgroundColor3 = C.side
+side.BackgroundTransparency = 0.3
 side.BorderSizePixel = 0
 side.Parent = body
 
@@ -1366,7 +1808,7 @@ sideLayout.Padding = UDim.new(0, 6)
 sideLayout.SortOrder = Enum.SortOrder.LayoutOrder
 sideLayout.Parent = sideList
 
-local pages = { "Home", "Move", "Portals", "Tools", "Visuals", "Players", "Settings" }
+local pages = { "Home", "Move", "PvP", "Farm", "Portals", "Tools", "Visuals", "Players", "Settings" }
 for index, name in ipairs(pages) do
 	local button = Instance.new("TextButton")
 	button.Size = UDim2.new(1, 0, 0, 36)
@@ -1381,6 +1823,20 @@ for index, name in ipairs(pages) do
 	button.Parent = sideList
 	corner(button, 8)
 	navButtons[name] = button
+	button.MouseEnter:Connect(function()
+		if state.page ~= name then
+			TweenService:Create(button, TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+				BackgroundColor3 = C.card,
+			}):Play()
+		end
+	end)
+	button.MouseLeave:Connect(function()
+		if state.page ~= name then
+			TweenService:Create(button, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+				BackgroundColor3 = C.side,
+			}):Play()
+		end
+	end)
 	button.MouseButton1Click:Connect(function()
 		state.page = name
 		renderPage()
@@ -1412,6 +1868,7 @@ right.AnchorPoint = Vector2.new(1, 0)
 right.Position = UDim2.new(1, 0, 0, 0)
 right.Size = UDim2.new(0, 232, 1, 0)
 right.BackgroundColor3 = C.side
+right.BackgroundTransparency = 0.3
 right.BorderSizePixel = 0
 right.Parent = body
 
@@ -1545,6 +2002,9 @@ for _, player in ipairs(Players:GetPlayers()) do
 end
 
 keepChat()
+TweenService:Create(window, TweenInfo.new(0.42, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+	Size = UDim2.fromOffset(880, 520),
+}):Play()
 renderPlayers()
 renderPage()
 if inPortal() then
