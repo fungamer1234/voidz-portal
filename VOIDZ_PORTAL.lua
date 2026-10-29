@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.25
+-- BUILD 2026-10-29-1.6.26
 -- Place 75108253383447 · Universe 10767619742
 -- RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.25"
+local BUILD = "2026-10-29-1.6.26"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -3376,8 +3376,7 @@ local function mechGrabbed(character, humanoid)
 		local slammed = ok and (humState == Enum.HumanoidStateType.FallingDown
 			or humState == Enum.HumanoidStateType.Physics
 			or humState == Enum.HumanoidStateType.Ragdoll)
-		local velocity = root and root.AssemblyLinearVelocity
-		if slammed or (velocity and velocity.Y < -50) then
+		if slammed then
 			if os.clock() > (state.mechSlam or 0) + 0.5 then
 				state.escapeClicks = 0
 				state.escapeMax = nil
@@ -3641,46 +3640,29 @@ local function onHeartbeat()
 	end
 	if state.autoEscape and inPortal() and not UserInputService:GetFocusedTextBox() and mechGrabbed(character, humanoid) then
 		local now = os.clock()
-		local function readEscapeMax()
-			if state.escapeMax then
-				return state.escapeMax
-			end
-			local maxClicks = nil
-			local playerGui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
-			if playerGui then
-				local ok, list = pcall(function()
-					return playerGui:GetDescendants()
-				end)
-				if ok then
-					for _, inst in ipairs(list) do
-						if inst:IsA("TextLabel") or inst:IsA("TextButton") then
-							local shown = inst.Text or ""
-							local _, capText = string.match(shown, "(%d+)%s*/%s*(%d+)")
-							local cap = tonumber(capText)
-								or tonumber(string.match(string.lower(shown), "(%d+)%s*click"))
-								or tonumber(string.match(string.lower(shown), "click%s*(%d+)"))
-							if cap and cap >= 1 and cap <= 30 then
-								maxClicks = cap
-								break
-							end
-						end
-					end
-				end
-			end
-			if maxClicks then
-				state.escapeMax = maxClicks
-				return maxClicks
-			end
-			return 10
+		local humState = nil
+		local okState, foundState = pcall(function()
+			return humanoid:GetState()
+		end)
+		if okState then
+			humState = foundState
 		end
-		local cap = readEscapeMax()
-		if (state.escapeClicks or 0) < cap and now >= (state.nextEscape or 0) then
-			state.nextEscape = now + 0.1
+		local velocity = root.AssemblyLinearVelocity
+		local slamFall = humState == Enum.HumanoidStateType.FallingDown
+			or humState == Enum.HumanoidStateType.Physics
+			or humState == Enum.HumanoidStateType.Ragdoll
+		local ourJump = (humState == Enum.HumanoidStateType.Jumping or humState == Enum.HumanoidStateType.Freefall) and not slamFall
+		local stuck = humanoid.SeatPart or humanoid.PlatformStand or root.Anchored
+		local grounded = humanoid.FloorMaterial ~= Enum.Material.Air
+		local running = humState == Enum.HumanoidStateType.Running or humState == Enum.HumanoidStateType.RunningNoPhysics
+		local runningFree = grounded and running and not stuck and not slamFall and not (velocity and velocity.Y < -50)
+		if not runningFree and not ourJump and now >= (state.nextEscape or 0) then
+			state.nextEscape = now + 0.05
 			state.escapeClicks = (state.escapeClicks or 0) + 1
 			pcall(function()
 				VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
 			end)
-			task.delay(0.04, function()
+			task.delay(0.02, function()
 				if not state.alive then
 					return
 				end
@@ -3688,10 +3670,10 @@ local function onHeartbeat()
 					VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
 				end)
 			end)
-			if state.escapeClicks == 1 or state.escapeClicks == cap then
+			if state.escapeClicks == 1 or state.escapeClicks % 10 == 0 then
 				if now >= (state.escapeNoted or 0) then
-					state.escapeNoted = now + 2
-					pushLog("Mech escape " .. tostring(state.escapeClicks) .. "/" .. tostring(cap))
+					state.escapeNoted = now + 1.5
+					pushLog("Mech escape " .. tostring(state.escapeClicks))
 				end
 			end
 		end
@@ -4923,7 +4905,7 @@ function renderPage()
 			renderPage()
 		end)
 		heading(centerHolder, "Survival", nextOrder())
-		note(centerHolder, "Mech escape sends one burst of space taps, up to the grab counter if the game shows one, then stops. A slam starts a new burst. It does not hold jump. Home returns you to your house spawn under the percent you set.", nextOrder())
+		note(centerHolder, "Mech escape keeps tapping space while a grab or slam is holding you, and stops once you are free. It does not hold jump. Home returns you to your house spawn under the percent you set.", nextOrder())
 		toggleRow(centerHolder, "Mech escape", nextOrder(), state.autoEscape, function()
 			if not state.autoEscape and not requireGame() then
 				return
