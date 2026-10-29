@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.20
+-- BUILD 2026-10-29-1.6.21
 -- Place 75108253383447 · Universe 10767619742
 -- RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.20"
+local BUILD = "2026-10-29-1.6.21"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -4494,6 +4494,7 @@ function renderPage()
 	local hints = {
 		Home = "Overview",
 		Move = "Fly, speed, and travel",
+		Teleport = "Home and jumps",
 		PvP = "Kill, escape, and home",
 		Materials = "Ground scrap",
 		Visuals = "Client look",
@@ -4513,6 +4514,7 @@ function renderPage()
 		note(centerHolder, where .. " Build " .. BUILD .. ". RightShift hides the hub.", nextOrder())
 		heading(centerHolder, "Tabs", nextOrder())
 		guideRow(centerHolder, "Move", "Fly, noclip, speed, jump, click teleport, anti void.", nextOrder())
+		guideRow(centerHolder, "Teleport", "Home base, a saved mark, and jumps to players or nearby spots.", nextOrder())
 		guideRow(centerHolder, "PvP", "Auto kill, mech escape, and home when hurt.", nextOrder())
 		guideRow(centerHolder, "Materials", "Stand on scrap and pick it up.", nextOrder())
 		guideRow(centerHolder, "Visuals", "ESP, fullbright, and field of view.", nextOrder())
@@ -4621,6 +4623,87 @@ function renderPage()
 			restoreCharacter()
 			pushLog("Movement stopped")
 			renderPage()
+		end)
+		return
+	end
+
+	if state.page == "Teleport" then
+		heading(centerHolder, "Home", nextOrder())
+		note(centerHolder, "Home base is the house you spawned at. Mark saves the spot you are standing on.", nextOrder())
+		actionButton(centerHolder, "Teleport to home base", nextOrder(), function()
+			if not state.house then
+				pushLog("Home base is not saved yet")
+				return
+			end
+			teleportTo(state.house, "Home base")
+		end)
+		actionButton(centerHolder, "Save mark", nextOrder(), function()
+			local _, _, root = characterParts()
+			if not root or not requireGame() then
+				pushLog("Nothing to mark")
+				return
+			end
+			state.mark = root.CFrame
+			pushLog("Mark saved")
+		end)
+		actionButton(centerHolder, "Teleport to mark", nextOrder(), function()
+			if not state.mark then
+				pushLog("No mark saved")
+				return
+			end
+			teleportTo(state.mark, "Saved mark")
+		end)
+		heading(centerHolder, "Jumps", nextOrder())
+		note(centerHolder, "These stay in the world you are in. Pick a player on the right for the selected jump.", nextOrder())
+		actionButton(centerHolder, "Teleport forward", nextOrder(), function()
+			local _, _, root = characterParts()
+			if not root then
+				pushLog("Nothing to teleport to")
+				return
+			end
+			local look = root.CFrame.LookVector
+			local flat = Vector3.new(look.X, 0, look.Z)
+			if flat.Magnitude < 0.05 then
+				flat = Vector3.new(0, 0, -1)
+			else
+				flat = flat.Unit
+			end
+			teleportTo(CFrame.lookAt(root.Position + flat * 50 + Vector3.new(0, 3, 0), root.Position + flat * 51), "Forward")
+		end)
+		actionButton(centerHolder, "Teleport up", nextOrder(), function()
+			local _, _, root = characterParts()
+			if not root then
+				pushLog("Nothing to teleport to")
+				return
+			end
+			teleportTo(root.CFrame + Vector3.new(0, 40, 0), "Up")
+		end)
+		actionButton(centerHolder, "Random nearby spot", nextOrder(), function()
+			local _, _, root = characterParts()
+			if not root then
+				pushLog("Nothing to teleport to")
+				return
+			end
+			local angle = math.random() * math.pi * 2
+			local dist = math.random(30, 90)
+			local offset = Vector3.new(math.cos(angle) * dist, 4, math.sin(angle) * dist)
+			teleportTo(CFrame.new(root.Position + offset), "Random spot")
+		end)
+		actionButton(centerHolder, "Teleport to selected player", nextOrder(), function()
+			teleportToPlayer(selectedPlayer())
+		end)
+		actionButton(centerHolder, "Teleport to random player", nextOrder(), function()
+			local choices = {}
+			for _, player in ipairs(Players:GetPlayers()) do
+				if player ~= LocalPlayer then
+					table.insert(choices, player)
+				end
+			end
+			if #choices == 0 then
+				pushLog("No players to teleport to")
+				return
+			end
+			teleportToPlayer(choices[math.random(1, #choices)])
 		end)
 		return
 	end
@@ -5080,7 +5163,7 @@ sideLayout.Padding = UDim.new(0, 4)
 sideLayout.SortOrder = Enum.SortOrder.LayoutOrder
 sideLayout.Parent = sideList
 
-local pages = { "Home", "Move", "PvP", "Materials", "Visuals", "Players", "Settings" }
+local pages = { "Home", "Move", "Teleport", "PvP", "Materials", "Visuals", "Players", "Settings" }
 for index, name in ipairs(pages) do
 	local button = Instance.new("TextButton")
 	button.Size = UDim2.new(1, 0, 0, 30)
