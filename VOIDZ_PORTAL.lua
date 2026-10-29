@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.18
+-- BUILD 2026-10-29-1.6.19
 -- Place 75108253383447 · Universe 10767619742
 -- RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.18"
+local BUILD = "2026-10-29-1.6.19"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -1174,6 +1174,18 @@ local function revertFeatures()
 	state.autoKill = false
 	state.autoFire = false
 	state.autoEscape = false
+	state.mechHeld = false
+	state.mechUntil = 0
+	if state.mechConns then
+		for _, conn in ipairs(state.mechConns) do
+			pcall(function()
+				conn:Disconnect()
+			end)
+		end
+		state.mechConns = nil
+	end
+	state.mechBound = nil
+	state.mechWatch = nil
 	state.autoHome = false
 	state.fleeing = false
 	state.autoFarm = false
@@ -3069,40 +3081,190 @@ local function partBlob(part)
 end
 
 local function mechGrabbed(character, humanoid)
-	local root = character:FindFirstChild("HumanoidRootPart")
-	if root then
-		local ok, parts = pcall(function()
-			return root:GetConnectedParts(true)
-		end)
-		if ok and type(parts) == "table" then
-			for _, part in ipairs(parts) do
-				if part ~= root and not part:IsDescendantOf(character) and mentionsMech(partBlob(part)) then
-					return true
+	if not state.mechWatch then
+		state.mechWatch = true
+		state.mechBound = {}
+		state.mechConns = {}
+		local function pack(...)
+			local bits = {}
+			local sawFalse = false
+			local sawSelf = false
+			local sawOther = false
+			for i = 1, math.min(select("#", ...), 8) do
+				local value = select(i, ...)
+				local kind = typeof(value)
+				if kind == "string" or kind == "number" or kind == "boolean" then
+					table.insert(bits, tostring(value))
+					if kind == "boolean" and value == false then
+						sawFalse = true
+					end
+				elseif kind == "Instance" then
+					table.insert(bits, value.Name)
+					if value == LocalPlayer or value == LocalPlayer.Character then
+						sawSelf = true
+					elseif value:IsA("Player") and value ~= LocalPlayer then
+						sawOther = true
+					end
 				end
-			end
-		end
-	end
-	if humanoid and humanoid.SeatPart and not humanoid.SeatPart:IsDescendantOf(character) then
-		local blob = partBlob(humanoid.SeatPart)
-		if mentionsMech(blob) and not mentionsIq(blob) then
-			return true
-		end
-	end
-	if root and humanoid and (humanoid.PlatformStand or root.Anchored) then
-		for _, player in ipairs(Players:GetPlayers()) do
-			if player ~= LocalPlayer and player.Character then
-				local otherRoot = player.Character:FindFirstChild("HumanoidRootPart")
-				if otherRoot and (otherRoot.Position - root.Position).Magnitude < 18 then
-					for _, child in ipairs(player.Character:GetChildren()) do
-						if mentionsMech(child.Name) then
-							return true
-						end
+				if kind == "number" and value == LocalPlayer.UserId then
+					sawSelf = true
+				end
+				if kind == "string" then
+					local lower = string.lower(value)
+					if lower == string.lower(LocalPlayer.Name) or lower == string.lower(LocalPlayer.DisplayName or "") then
+						sawSelf = true
 					end
 				end
 			end
+			return string.lower(table.concat(bits, " ")), sawFalse, sawSelf, sawOther
+		end
+		local function kindOf(name, text, sawFalse)
+			local hay = string.lower(tostring(name or "")) .. " " .. text
+			if string.find(hay, "scrap", 1, true) or string.find(hay, "material", 1, true) or string.find(hay, "shop", 1, true) then
+				return nil
+			end
+			if string.find(hay, "ungrab", 1, true)
+				or string.find(hay, "release", 1, true)
+				or string.find(hay, "detach", 1, true)
+				or string.find(hay, "letgo", 1, true)
+				or string.find(hay, "let go", 1, true)
+				or string.find(hay, "dropped", 1, true)
+				or string.find(hay, "unheld", 1, true)
+				or string.find(hay, "escaped", 1, true) then
+				return "free"
+			end
+			local grab = string.find(hay, "grab", 1, true)
+				or string.find(hay, "caught", 1, true)
+				or string.find(hay, "capture", 1, true)
+				or string.find(hay, "claw", 1, true)
+				or string.find(hay, "seized", 1, true)
+			if not grab then
+				return nil
+			end
+			if sawFalse then
+				return "free"
+			end
+			return "grab"
+		end
+		local function note(remote, fromServer, ...)
+			if not state.alive then
+				return
+			end
+			local text, sawFalse, sawSelf, sawOther = pack(...)
+			if not fromServer and not sawSelf then
+				return
+			end
+			local kind = kindOf(remote and remote.Name, text, sawFalse)
+			if kind == "free" then
+				if state.mechHeld and os.clock() > (state.escapeNoted or 0) then
+					state.escapeNoted = os.clock() + 2
+					pushLog("Mech let go")
+				end
+				state.mechHeld = false
+				state.mechLoose = nil
+				state.mechSince = nil
+			elseif kind == "grab" then
+				if not state.mechHeld then
+					state.mechSince = os.clock()
+				end
+				state.mechHeld = true
+			end
+		end
+		local function isEvent(inst)
+			if typeof(inst) ~= "Instance" then
+				return false
+			end
+			local ok, yes = pcall(function()
+				return inst:IsA("RemoteEvent") or inst:IsA("UnreliableRemoteEvent")
+			end)
+			return ok and yes
+		end
+		local function watch(inst)
+			if not isEvent(inst) or state.mechBound[inst] then
+				return
+			end
+			state.mechBound[inst] = true
+			local ok, conn = pcall(function()
+				return inst.OnClientEvent:Connect(function(...)
+					note(inst, true, ...)
+				end)
+			end)
+			if ok and conn then
+				table.insert(state.mechConns, conn)
+			end
+		end
+		for _, inst in ipairs(game:GetDescendants()) do
+			watch(inst)
+		end
+		local addedOk, added = pcall(function()
+			return game.DescendantAdded:Connect(function(inst)
+				watch(inst)
+			end)
+		end)
+		if addedOk and added then
+			table.insert(state.mechConns, added)
+		end
+		if type(hookmetamethod) == "function" and type(getnamecallmethod) == "function" then
+			pcall(function()
+				local previous
+				previous = hookmetamethod(game, "__namecall", function(self, ...)
+					local method = getnamecallmethod()
+					if method == "FireServer" or method == "InvokeServer" then
+						local ours = false
+						if type(checkcaller) == "function" then
+							local callerOk, caller = pcall(checkcaller)
+							ours = callerOk and caller
+						end
+						if not ours and typeof(self) == "Instance" then
+							local className = self.ClassName
+							if className == "RemoteEvent" or className == "RemoteFunction" or className == "UnreliableRemoteEvent" then
+								note(self, false, ...)
+							end
+						end
+					end
+					return previous(self, ...)
+				end)
+			end)
 		end
 	end
-	return false
+	if not state.mechHeld then
+		state.mechLoose = nil
+		state.mechSince = nil
+		return false
+	end
+	if humanoid and os.clock() > (state.mechSince or 0) + 1 then
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		local stuck = humanoid.SeatPart or humanoid.PlatformStand or (root and root.Anchored)
+		if not stuck then
+			local ok, humState = pcall(function()
+				return humanoid:GetState()
+			end)
+			local moving = ok and (humState == Enum.HumanoidStateType.Running
+				or humState == Enum.HumanoidStateType.RunningNoPhysics
+				or humState == Enum.HumanoidStateType.Landed
+				or humState == Enum.HumanoidStateType.Jumping
+				or humState == Enum.HumanoidStateType.Freefall)
+			if moving then
+				if not state.mechLoose then
+					state.mechLoose = os.clock()
+				elseif os.clock() - state.mechLoose > 0.45 then
+					state.mechHeld = false
+					state.mechLoose = nil
+					state.mechSince = nil
+					if os.clock() > (state.escapeNoted or 0) then
+						state.escapeNoted = os.clock() + 2
+						pushLog("Mech let go")
+					end
+					return false
+				end
+			else
+				state.mechLoose = nil
+			end
+		else
+			state.mechLoose = nil
+		end
+	end
+	return true
 end
 
 local function shouldGoHome(humanoid)
@@ -4480,7 +4642,7 @@ function renderPage()
 			renderPage()
 		end)
 		heading(centerHolder, "Survival", nextOrder())
-		note(centerHolder, "Mech escape spams space during a grab. Home returns you to your house spawn under the percent you set.", nextOrder())
+		note(centerHolder, "Mech escape listens for the game's grab remote, then spams space until that grab ends. Home returns you to your house spawn under the percent you set.", nextOrder())
 		toggleRow(centerHolder, "Mech escape", nextOrder(), state.autoEscape, function()
 			if not state.autoEscape and not requireGame() then
 				return
