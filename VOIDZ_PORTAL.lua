@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.40
+-- BUILD 2026-10-29-1.6.41
 -- Place 75108253383447 · Universe 10767619742
 -- The picture button or RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.40"
+local BUILD = "2026-10-29-1.6.41"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -85,6 +85,8 @@ local state = {
 	blink = false,
 	bring = false,
 	bringStuds = 80,
+	thaw = false,
+	parry = false,
 	autoFarm = false,
 	autoQuest = false,
 	autoIq = false,
@@ -1237,6 +1239,11 @@ local function revertFeatures()
 	state.bringLink = nil
 	state.bringHeld = nil
 	state.bringToss = 0
+	state.thaw = false
+	state.parry = false
+	state.parryPart = nil
+	state.parryUntil = 0
+	state.frozenUntil = 0
 	if state.phaseConn then
 		state.phaseConn:Disconnect()
 		state.phaseConn = nil
@@ -3537,6 +3544,12 @@ local function mechGrabbed(character, humanoid)
 			if not fromServer and not sawSelf then
 				return
 			end
+			local remoteName = string.lower(tostring(remote and remote.Name or ""))
+			local namedFreeze = string.find(remoteName, "freeze", 1, true) or string.find(remoteName, "frozen", 1, true) or string.find(remoteName, "stun", 1, true)
+			local saidFreeze = string.find(text, "freeze", 1, true) or string.find(text, "frozen", 1, true)
+			if (namedFreeze and (fromServer or sawSelf)) or (saidFreeze and sawSelf) then
+				state.frozenUntil = os.clock() + 3
+			end
 			local kind = kindOf(remote and remote.Name, text, sawFalse)
 			if kind == "slam" or kind == "grab" then
 				if not state.mechHeld then
@@ -3775,7 +3788,7 @@ local function onHeartbeat()
 	if state.iqBusy and next(collideSaved) then
 		restoreCollide()
 	end
-	if (state.noclip or state.shove or os.clock() < (state.blinkUntil or 0)) and inPortal() and not state.iqBusy then
+	if (state.noclip or state.shove or os.clock() < (state.blinkUntil or 0) or os.clock() < (state.parryUntil or 0)) and inPortal() and not state.iqBusy then
 		if state.phaseChar ~= character then
 			if state.phaseConn then
 				state.phaseConn:Disconnect()
@@ -3783,7 +3796,7 @@ local function onHeartbeat()
 			state.phaseChar = character
 			state.phaseScan = 0
 			state.phaseConn = character.DescendantAdded:Connect(function(inst)
-				if not state.alive or state.iqBusy or not (state.noclip or state.shove or os.clock() < (state.blinkUntil or 0)) then
+				if not state.alive or state.iqBusy or not (state.noclip or state.shove or os.clock() < (state.blinkUntil or 0) or os.clock() < (state.parryUntil or 0)) then
 					return
 				end
 				if inst:IsA("BasePart") and inst.CanCollide then
@@ -3819,7 +3832,7 @@ local function onHeartbeat()
 	if materialHoldActive() then
 		state.locking = true
 	end
-	if state.fly and inPortal() and not state.iqBusy and not state.killPart and not state.autoKill and not state.fleeing and os.clock() >= (state.blinkUntil or 0) and not materialHoldActive() then
+	if state.fly and inPortal() and not state.iqBusy and not state.killPart and not state.autoKill and not state.fleeing and os.clock() >= (state.blinkUntil or 0) and os.clock() >= (state.parryUntil or 0) and not materialHoldActive() then
 		local gyro, velocity = ensureFly(root)
 		local camera = workspace.CurrentCamera
 		if gyro and camera then
@@ -3852,6 +3865,7 @@ local function onHeartbeat()
 		and not materialHoldActive()
 		and not state.portalCf
 		and os.clock() >= (state.blinkUntil or 0)
+		and os.clock() >= (state.parryUntil or 0)
 		and not humanoid.SeatPart
 	if canShove then
 		local shoveNow = os.clock()
@@ -4042,7 +4056,7 @@ local function onHeartbeat()
 	end
 	if not state.stepAway then
 		state.stepAway = function(fromRoot)
-			if not fromRoot or not state.blink or not inPortal() or state.fleeing or state.autoKill or state.killPart or state.iqBusy or materialHoldActive() then
+			if not fromRoot or not state.blink or state.parry or not inPortal() or state.fleeing or state.autoKill or state.killPart or state.iqBusy or materialHoldActive() then
 				return
 			end
 			local now = os.clock()
@@ -4182,8 +4196,13 @@ local function onHeartbeat()
 				if killHold then
 					killHold:Destroy()
 				end
-			elseif state.stepAway and type(previous) == "number" and nowHp < previous - 0.05 then
-				state.stepAway(hpRoot)
+			elseif type(previous) == "number" and nowHp < previous - 0.05 then
+				if state.parry then
+					state.parryShotUntil = os.clock() + 1.2
+				end
+				if state.stepAway then
+					state.stepAway(hpRoot)
+				end
 			end
 			state.lastHp = nowHp
 		end)
@@ -4198,7 +4217,7 @@ local function onHeartbeat()
 	else
 		state.fleeing = false
 	end
-	if state.blinkCf and os.clock() < (state.blinkUntil or 0) and not state.fleeing and (root.Position - state.blinkCf.Position).Magnitude > 1.5 then
+	if state.blinkCf and os.clock() < (state.blinkUntil or 0) and not state.fleeing and not state.parry and (root.Position - state.blinkCf.Position).Magnitude > 1.5 then
 		root.CFrame = state.blinkCf
 		pcall(function()
 			root.AssemblyLinearVelocity = Vector3.zero
@@ -4206,16 +4225,137 @@ local function onHeartbeat()
 		end)
 	end
 	local previousHp = state.lastHp
-	if not state.fleeing and state.stepAway and type(previousHp) == "number" and humanoid.Health < previousHp - 0.05 then
-		state.stepAway(root)
+	if not state.fleeing and type(previousHp) == "number" and humanoid.Health < previousHp - 0.05 then
+		if state.parry then
+			state.parryShotUntil = os.clock() + 1.2
+		end
+		if state.stepAway then
+			state.stepAway(root)
+		end
 	end
 	state.lastHp = humanoid.Health
+	if not state.stepParry then
+		state.stepParry = function(fromRoot)
+			if not state.parry or not fromRoot or not inPortal() or state.autoKill or state.killPart or state.fleeing or state.iqBusy or state.mechHeld or materialHoldActive() or os.clock() < (state.blinkUntil or 0) then
+				return false
+			end
+			local now = os.clock()
+			local function weaponPart(player)
+				local model = player.Character
+				if not model then
+					return nil
+				end
+				for _, child in ipairs(model:GetChildren()) do
+					if child:IsA("Tool") then
+						local name = string.lower(child.Name)
+						if not string.find(name, "portal", 1, true) then
+							if string.find(name, "gun", 1, true)
+								or string.find(name, "blaster", 1, true)
+								or string.find(name, "laser", 1, true)
+								or string.find(name, "pistol", 1, true)
+								or string.find(name, "freeze", 1, true)
+								or string.find(name, "ice", 1, true)
+								or string.find(name, "knife", 1, true)
+								or string.find(name, "sword", 1, true)
+								or string.find(name, "mech", 1, true)
+								or string.find(name, "rifle", 1, true) then
+								return playerRoot(player)
+							end
+						end
+					end
+				end
+				return nil
+			end
+			if now >= (state.parryScan or 0) or not state.parryPart or not state.parryPart.Parent then
+				state.parryScan = now + 0.1
+				local found = nil
+				local foundId = nil
+				local picked = selectedPlayer()
+				if picked then
+					found = weaponPart(picked)
+					foundId = found and picked.UserId or nil
+				end
+				if not found then
+					local closest = 90
+					for _, player in ipairs(Players:GetPlayers()) do
+						if player ~= LocalPlayer and not sameTeam(player) then
+							local part = weaponPart(player)
+							if part then
+								local dist = (part.Position - fromRoot.Position).Magnitude
+								if dist < closest then
+									closest = dist
+									found = part
+									foundId = player.UserId
+								end
+							end
+						end
+					end
+				end
+				if not found and now < (state.parryShotUntil or 0) then
+					local closest = 90
+					for _, player in ipairs(Players:GetPlayers()) do
+						if player ~= LocalPlayer and not sameTeam(player) then
+							local part = playerRoot(player)
+							if part then
+								local dist = (part.Position - fromRoot.Position).Magnitude
+								if dist < closest then
+									closest = dist
+									found = part
+									foundId = player.UserId
+								end
+							end
+						end
+					end
+				end
+				if state.parryId ~= foundId then
+					state.parrySpin = now
+					state.parryId = foundId
+				end
+				state.parryPart = found
+			end
+			local part = state.parryPart
+			if not part or not part.Parent then
+				return false
+			end
+			local look = part.CFrame.LookVector
+			local flat = Vector3.new(look.X, 0, look.Z)
+			if flat.Magnitude < 0.05 then
+				flat = Vector3.new(0, 0, -1)
+			else
+				flat = flat.Unit
+			end
+			local spin = (now - (state.parrySpin or now)) * (math.pi * 2 / 0.55)
+			local right = Vector3.new(-flat.Z, 0, flat.X)
+			local offset = ((-flat * math.cos(spin)) + (right * math.sin(spin))) * 8
+			local pos = part.Position + offset + Vector3.new(0, 2, 0)
+			fromRoot.CFrame = CFrame.lookAt(pos, Vector3.new(part.Position.X, pos.Y, part.Position.Z))
+			pcall(function()
+				fromRoot.AssemblyLinearVelocity = Vector3.zero
+				fromRoot.AssemblyAngularVelocity = Vector3.zero
+			end)
+			for _, name in ipairs({ "VOIDZ_WalkBV", "VOIDZ_Shove" }) do
+				local mover = fromRoot:FindFirstChild(name)
+				if mover then
+					mover:Destroy()
+				end
+			end
+			state.parryUntil = now + 0.3
+			if now >= (state.parryNoted or 0) then
+				state.parryNoted = now + 2
+				pushLog("Parry circle")
+			end
+			return true
+		end
+	end
+	if state.stepParry then
+		state.stepParry(root)
+	end
 	if not state.stepBring then
 		state.stepBring = function(fromRoot, fromChar)
 			if not state.bring or not inPortal() or state.fleeing or state.autoKill or state.killPart or state.iqBusy or state.mechHeld or materialHoldActive() then
 				return
 			end
-			if os.clock() < (state.blinkUntil or 0) or state.portalCf or UserInputService:GetFocusedTextBox() then
+			if os.clock() < (state.blinkUntil or 0) or os.clock() < (state.parryUntil or 0) or state.portalCf or UserInputService:GetFocusedTextBox() then
 				return
 			end
 			local now = os.clock()
@@ -5477,7 +5617,7 @@ function renderPage()
 		guideRow(centerHolder, "Materials", "Stand on scrap, or take 10 from each area.", nextOrder())
 		guideRow(centerHolder, "Visuals", "ESP, fullbright, and field of view.", nextOrder())
 		guideRow(centerHolder, "Players", "Select someone for teleport, spectate, and kill.", nextOrder())
-		guideRow(centerHolder, "Misc", "Bring grabs the selected player with the robo arms and teleports them away.", nextOrder())
+		guideRow(centerHolder, "Misc", "Bring, walk after a freeze gun, and parry around someone with a weapon.", nextOrder())
 		guideRow(centerHolder, "Settings", "Keybinds, theme, or unload the hub.", nextOrder())
 		heading(centerHolder, "Activity", nextOrder())
 		for _, line in ipairs(logs) do
@@ -5934,6 +6074,35 @@ function renderPage()
 			renderPage()
 		end, function()
 			state.bringStuds = math.min(200, (state.bringStuds or 80) + 20)
+			renderPage()
+		end)
+		heading(centerHolder, "Counter", nextOrder())
+		note(centerHolder, "Freeze walk lets you move after a freeze gun locks you in place. Hold WASD. Parry snaps you behind a player who has a weapon out, or who just shot you, then keeps teleporting in a circle around them.", nextOrder())
+		toggleRow(centerHolder, "Freeze walk", nextOrder(), state.thaw == true, function()
+			if not state.thaw and not requireGame() then
+				return
+			end
+			state.thaw = not state.thaw
+			state.justToggled = "Freeze walk"
+			if not state.thaw then
+				state.frozenUntil = 0
+				state.thawNamed = false
+			end
+			pushLog(state.thaw and "Freeze walk on" or "Freeze walk off")
+			renderPage()
+		end)
+		toggleRow(centerHolder, "Parry", nextOrder(), state.parry == true, function()
+			if not state.parry and not requireGame() then
+				return
+			end
+			state.parry = not state.parry
+			state.justToggled = "Parry"
+			if not state.parry then
+				state.parryPart = nil
+				state.parryUntil = 0
+				state.parryId = nil
+			end
+			pushLog(state.parry and "Parry on" or "Parry off")
 			renderPage()
 		end)
 		animatePage()
@@ -7109,11 +7278,140 @@ bind(UserInputService.JumpRequest, function()
 end)
 bind(RunService.Heartbeat, onHeartbeat)
 bind(RunService.Stepped, function()
-	if not state.alive or not state.speed or not inPortal() then
+	if not state.alive or not inPortal() then
 		return
 	end
-	local _, humanoid, root = characterParts()
+	if not state.speed and not state.thaw then
+		return
+	end
+	local character, humanoid, root = characterParts()
 	if not humanoid or not root then
+		return
+	end
+	if state.thaw and character then
+		local now = os.clock()
+		local stuck = root.Anchored or humanoid.WalkSpeed < 1 or (humanoid.PlatformStand and not state.fly) or now < (state.frozenUntil or 0)
+		if not stuck then
+			local okState, humState = pcall(function()
+				return humanoid:GetState()
+			end)
+			if okState and not humanoid.SeatPart and (humState == Enum.HumanoidStateType.Physics or humState == Enum.HumanoidStateType.Ragdoll or humState == Enum.HumanoidStateType.Seated) then
+				stuck = true
+			end
+		end
+		if now >= (state.thawScan or 0) then
+			state.thawScan = now + 0.25
+			state.thawNamed = false
+			for _, inst in ipairs(character:GetDescendants()) do
+				local blob = string.lower(inst.Name)
+				if string.find(blob, "freeze", 1, true) or string.find(blob, "frozen", 1, true) or string.find(blob, "stun", 1, true) or string.find(blob, "paral", 1, true) then
+					state.thawNamed = true
+					local className = inst.ClassName
+					local mover = className == "BodyPosition" or className == "BodyVelocity" or className == "BodyGyro" or className == "AlignPosition" or className == "AlignOrientation"
+					if string.sub(inst.Name, 1, 6) ~= "VOIDZ_" and (mover or className == "Weld" or className == "WeldConstraint" or className == "RopeConstraint") then
+						pcall(function()
+							inst:Destroy()
+						end)
+					end
+				end
+			end
+			if stuck then
+				for _, inst in ipairs(root:GetChildren()) do
+					local className = inst.ClassName
+					if string.sub(inst.Name, 1, 6) ~= "VOIDZ_" and (className == "BodyPosition" or className == "BodyGyro" or className == "AlignPosition" or className == "AlignOrientation") then
+						pcall(function()
+							inst:Destroy()
+						end)
+					end
+				end
+			end
+		end
+		if state.thawNamed then
+			stuck = true
+		end
+		if state.mechHeld then
+			stuck = false
+		end
+		if stuck then
+			root.Anchored = false
+			if not state.fly then
+				humanoid.PlatformStand = false
+			end
+			if humanoid.WalkSpeed < 1 then
+				humanoid.WalkSpeed = (state.speed and state.walkSpeed) or 32
+			end
+			humanoid.AutoRotate = true
+			pcall(function()
+				local humState = humanoid:GetState()
+				if not humanoid.SeatPart and (humState == Enum.HumanoidStateType.Physics or humState == Enum.HumanoidStateType.Ragdoll or humState == Enum.HumanoidStateType.Seated) then
+					humanoid:ChangeState(Enum.HumanoidStateType.Running)
+				end
+			end)
+			if now >= (state.thawNoted or 0) then
+				state.thawNoted = now + 2
+				pushLog("Freeze gun released, you can walk")
+			end
+			local busy = state.fly
+				or state.autoKill
+				or state.killPart
+				or state.fleeing
+				or now < (state.blinkUntil or 0)
+				or now < (state.parryUntil or 0)
+				or state.iqBusy
+				or state.mechHeld
+				or state.portalCf
+				or materialHoldActive()
+				or humanoid.SeatPart
+				or UserInputService:GetFocusedTextBox()
+			if not state.speed and not busy then
+				local camera = workspace.CurrentCamera
+				local wish = Vector3.zero
+				if camera then
+					local look = camera.CFrame.LookVector
+					local right = camera.CFrame.RightVector
+					local flatLook = Vector3.new(look.X, 0, look.Z)
+					local flatRight = Vector3.new(right.X, 0, right.Z)
+					if flatLook.Magnitude < 0.05 then
+						flatLook = Vector3.new(0, 0, -1)
+					else
+						flatLook = flatLook.Unit
+					end
+					if flatRight.Magnitude < 0.05 then
+						flatRight = Vector3.new(1, 0, 0)
+					else
+						flatRight = flatRight.Unit
+					end
+					if held[Enum.KeyCode.W] then
+						wish = wish + flatLook
+					end
+					if held[Enum.KeyCode.S] then
+						wish = wish - flatLook
+					end
+					if held[Enum.KeyCode.D] then
+						wish = wish + flatRight
+					end
+					if held[Enum.KeyCode.A] then
+						wish = wish - flatRight
+					end
+				end
+				local existing = root:FindFirstChild("VOIDZ_WalkBV")
+				if wish.Magnitude < 0.05 then
+					if existing then
+						existing:Destroy()
+					end
+				else
+					if not existing then
+						existing = Instance.new("BodyVelocity")
+						existing.Name = "VOIDZ_WalkBV"
+						existing.MaxForce = Vector3.new(400000, 0, 400000)
+						existing.Parent = root
+					end
+					existing.Velocity = wish.Unit * ((state.speed and state.walkSpeed) or 32)
+				end
+			end
+		end
+	end
+	if not state.speed then
 		return
 	end
 	humanoid.WalkSpeed = state.walkSpeed
@@ -7122,6 +7420,7 @@ bind(RunService.Stepped, function()
 		or state.killPart
 		or state.fleeing
 		or os.clock() < (state.blinkUntil or 0)
+		or os.clock() < (state.parryUntil or 0)
 		or state.iqBusy
 		or state.mechHeld
 		or state.portalCf
@@ -7221,7 +7520,7 @@ RunService:BindToRenderStep("VOIDZ_PORTAL_STICK", Enum.RenderPriority.Last.Value
 		end
 		return
 	end
-	if state.blinkCf and os.clock() < (state.blinkUntil or 0) and not state.autoKill then
+	if state.blinkCf and os.clock() < (state.blinkUntil or 0) and not state.autoKill and not state.parry then
 		local _, _, blinkRoot = characterParts()
 		if blinkRoot and (blinkRoot.Position - state.blinkCf.Position).Magnitude > 1.5 then
 			blinkRoot.CFrame = state.blinkCf
@@ -7231,6 +7530,12 @@ RunService:BindToRenderStep("VOIDZ_PORTAL_STICK", Enum.RenderPriority.Last.Value
 			end)
 		end
 		return
+	end
+	if state.parry and not state.autoKill and state.stepParry then
+		local _, _, parryRoot = characterParts()
+		if parryRoot and state.stepParry(parryRoot) then
+			return
+		end
 	end
 	if state.autoKill then
 		local ok, err = pcall(function()
