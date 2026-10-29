@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.3
+-- BUILD 2026-10-29-1.6.4
 -- Place 75108253383447 · Universe 10767619742
 -- RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.3"
+local BUILD = "2026-10-29-1.6.4"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -747,6 +747,24 @@ local function materialEligible(part)
 	if part.Name == "VOIDZ_Block" or part.Name == "HumanoidRootPart" or part.Name == "VOIDZ_Follow" then
 		return false
 	end
+	if part:IsA("Seat") or part:IsA("VehicleSeat") then
+		return false
+	end
+	local blob = string.lower(part.Name)
+	local parent = part.Parent
+	if parent then
+		blob = blob .. " " .. string.lower(parent.Name)
+	end
+	if string.find(blob, "seat", 1, true) or string.find(blob, "chair", 1, true) or string.find(blob, "stool", 1, true) or string.find(blob, "iq", 1, true) then
+		return false
+	end
+	if parent then
+		for _, child in ipairs(parent:GetChildren()) do
+			if child:IsA("Seat") or child:IsA("VehicleSeat") then
+				return false
+			end
+		end
+	end
 	if part:FindFirstChild("VOIDZ_Hold") then
 		return false
 	end
@@ -914,11 +932,15 @@ local function fireCollect(inst, root)
 end
 
 local function forcePickup(part, root)
-	local stand = part.Position + Vector3.new(0, math.max(3, part.Size.Y * 0.5 + 2), 0)
+	local stand = part.Position + Vector3.new(4, 3, 0)
 	root.CFrame = CFrame.lookAt(stand, part.Position)
 	pcall(function()
 		root.AssemblyLinearVelocity = Vector3.zero
 	end)
+	local humanoid = root.Parent and root.Parent:FindFirstChildOfClass("Humanoid")
+	if humanoid and humanoid.Sit then
+		humanoid.Sit = false
+	end
 	fireCollect(part, root)
 	state.tried[part] = os.clock()
 	task.delay(0.2, function()
@@ -1013,8 +1035,8 @@ local function livingRoot(model)
 end
 
 local function nearestPlayer(origin)
-	if state.killSelected then
-		local picked = selectedPlayer()
+	local picked = selectedPlayer()
+	if state.killSelected or picked then
 		if picked and picked ~= LocalPlayer and not sameTeam(picked) then
 			local part = livingRoot(picked.Character)
 			if part then
@@ -1175,26 +1197,27 @@ local function placeBehind(root, part, aimCamera)
 	else
 		flat = flat.Unit
 	end
-	local pos = part.Position - flat * 9 + Vector3.new(0, 2, 0)
-	local head = part.Parent and part.Parent:FindFirstChild("Head")
-	local aim = (head and head.Position) or (part.Position + Vector3.new(0, 1.5, 0))
+	local pos = part.Position - flat * 5 + Vector3.new(0, 1.5, 0)
+	local model = part.Parent
+	local torso = model and (model:FindFirstChild("UpperTorso") or model:FindFirstChild("Torso") or model:FindFirstChild("Head"))
+	local aim = (torso and torso:IsA("BasePart") and torso.Position) or (part.Position + Vector3.new(0, 1.2, 0))
 	state.aimPoint = aim
 	root.CFrame = CFrame.lookAt(pos, aim)
 	pcall(function()
 		root.AssemblyLinearVelocity = Vector3.zero
 		root.AssemblyAngularVelocity = Vector3.zero
 	end)
-	if aimCamera and not pointerOverHub() then
+	if aimCamera then
 		local camera = workspace.CurrentCamera
 		if camera then
-			camera.CFrame = CFrame.lookAt(pos + Vector3.new(0, 1.2, 0), aim)
+			local eye = pos + Vector3.new(0, 1.5, 0)
+			camera.CFrame = CFrame.lookAt(eye, aim)
 		end
 	end
 end
 
 local function strike(root, part)
 	placeBehind(root, part, true)
-	clickAttack()
 end
 
 local aimMouse = LocalPlayer:GetMouse()
@@ -1897,9 +1920,17 @@ end
 
 local function runMaterials(root)
 	local scraping = state.autoMat or (state.autoQuest and state.questCollect)
-	if state.iqBusy or not scraping or not inPortal() then
+	if not scraping or not inPortal() then
 		return
 	end
+	if state.autoIq and not state.autoMat then
+		return
+	end
+	local _, humanoid = characterParts()
+	if humanoid and humanoid.Sit then
+		humanoid.Sit = false
+	end
+	state.iqBusy = false
 	if state.autoKill or (state.autoQuest and (state.questKillPlayers or state.questKillNpc)) then
 		return
 	end
@@ -2076,8 +2107,10 @@ local function fireSeatPrompt(seat)
 end
 
 local function runIq(root)
-	if not state.autoIq or not inPortal() then
-		state.iqBusy = false
+	if state.autoMat or not state.autoIq or not inPortal() then
+		if state.autoMat or not state.autoIq then
+			state.iqBusy = false
+		end
 		return
 	end
 	local now = os.clock()
@@ -2182,6 +2215,11 @@ local function runCombat(root)
 			state.locking = false
 			state.killPart = nil
 			state.aimPoint = nil
+			local picked = selectedPlayer()
+			if (state.killSelected or picked) and now > (state.nextKillNote or 0) then
+				state.nextKillNote = now + 4
+				pushLog(picked and (picked.DisplayName .. " is down") or "Pick a player on the right")
+			end
 			return
 		end
 		state.locking = true
@@ -2190,10 +2228,6 @@ local function runCombat(root)
 		if state.lastTarget ~= label then
 			state.lastTarget = label
 			pushLog("Target " .. tostring(label))
-		end
-		if now >= (state.nextHit or 0) then
-			state.nextHit = now + 0.18
-			clickAttack()
 		end
 		return
 	end
@@ -2972,7 +3006,7 @@ function renderPage()
 	end
 
 	if state.page == "PvP" then
-		note(centerHolder, "Auto kill stays behind a living player and pulls out a blaster, laser, mech, or portal gun. Shots are aimed at them. The hub does not take those clicks, so the toggles still turn off. It does not invent a damage remote.", nextOrder())
+		note(centerHolder, "Auto kill stays on the target and fires after the camera is aimed, so the shot hits. If you select a player, it only hunts that player and waits when they die. It does not switch to someone else.", nextOrder())
 		toggleRow(centerHolder, "Auto kill", nextOrder(), state.autoKill, function()
 			if not state.autoKill and not requireGame() then
 				return
@@ -3012,7 +3046,7 @@ function renderPage()
 		if state.material and state.matIndex[state.material] then
 			left = #state.matIndex[state.material]
 		end
-		note(centerHolder, "Auto collect teleports to materials on the ground, picks them up, then goes to the next closest. Choose one in the list to grab only that type. It does not sit in the IQ chair.", nextOrder())
+		note(centerHolder, "Auto collect walks the closest ground parts, picks each one up, then goes to the next. It skips chairs and will stand you up if a seat grabs you. Choose a material to grab only that type.", nextOrder())
 		note(centerHolder, "Selected: " .. chosen .. "  ·  " .. tostring(left) .. " left. Found " .. tostring(#state.matList) .. " types.", nextOrder())
 		actionButton(centerHolder, "Scan materials", nextOrder(), function()
 			if not requireGame() then
@@ -3788,6 +3822,10 @@ RunService:BindToRenderStep("VOIDZ_PORTAL_STICK", Enum.RenderPriority.Camera.Val
 			stickHumanoid.PlatformStand = false
 		end
 		placeBehind(stickRoot, state.killPart, true)
+		if os.clock() >= (state.nextHit or 0) then
+			state.nextHit = os.clock() + 0.1
+			clickAttack()
+		end
 	end)
 	if not ok and os.clock() > (state.nextErr or 0) then
 		state.nextErr = os.clock() + 5
