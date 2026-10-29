@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.32
+-- BUILD 2026-10-29-1.6.33
 -- Place 75108253383447 · Universe 10767619742
 -- The picture button or RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.32"
+local BUILD = "2026-10-29-1.6.33"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -40,16 +40,16 @@ if stale then
 end
 
 local C = {
-	bg = Color3.fromRGB(6, 12, 8),
-	bar = Color3.fromRGB(8, 16, 10),
-	side = Color3.fromRGB(7, 14, 9),
-	card = Color3.fromRGB(12, 22, 14),
-	card2 = Color3.fromRGB(20, 38, 22),
-	line = Color3.fromRGB(64, 104, 46),
-	text = Color3.fromRGB(244, 250, 236),
-	muted = Color3.fromRGB(186, 206, 172),
-	accent = Color3.fromRGB(176, 236, 72),
-	good = Color3.fromRGB(140, 230, 90),
+	bg = Color3.fromRGB(12, 9, 6),
+	bar = Color3.fromRGB(18, 13, 8),
+	side = Color3.fromRGB(14, 10, 6),
+	card = Color3.fromRGB(26, 18, 10),
+	card2 = Color3.fromRGB(46, 32, 14),
+	line = Color3.fromRGB(148, 108, 42),
+	text = Color3.fromRGB(255, 246, 226),
+	muted = Color3.fromRGB(214, 190, 150),
+	accent = Color3.fromRGB(232, 184, 64),
+	good = Color3.fromRGB(120, 210, 140),
 	warn = Color3.fromRGB(255, 196, 120),
 	bad = Color3.fromRGB(255, 120, 130),
 }
@@ -106,6 +106,8 @@ local state = {
 	autoMat = false,
 	zoneMat = false,
 	souljaAudio = false,
+	evilAudio = true,
+	musicOn = true,
 	material = nil,
 	matOpen = false,
 	matList = {},
@@ -4666,7 +4668,7 @@ local function toggleRow(parent, title, order, isOn, callback)
 	local pill = Instance.new("TextButton")
 	pill.Size = UDim2.fromOffset(42, 22)
 	pill.Position = UDim2.new(1, -52, 0.5, -11)
-	pill.BackgroundColor3 = isOn and C.accent or Color3.fromRGB(32, 46, 30)
+	pill.BackgroundColor3 = isOn and C.accent or Color3.fromRGB(54, 40, 18)
 	pill.Text = ""
 	pill.AutoButtonColor = false
 	pill.Parent = row
@@ -4749,7 +4751,7 @@ local function renderPlayers()
 			local picked = (not mine) and state.selected == player.UserId
 			local card = Instance.new("TextButton")
 			card.Size = UDim2.new(1, 0, 0, 64)
-			card.BackgroundColor3 = picked and Color3.fromRGB(24, 52, 22) or C.card
+			card.BackgroundColor3 = picked and Color3.fromRGB(62, 44, 16) or C.card
 			card.AutoButtonColor = false
 			card.Text = ""
 			card.LayoutOrder = shown
@@ -4816,7 +4818,7 @@ local function renderPlayers()
 			role.Font = Enum.Font.GothamBold
 			role.TextSize = 11
 			role.TextXAlignment = Enum.TextXAlignment.Center
-			role.TextColor3 = picked and Color3.fromRGB(20, 12, 32) or C.muted
+			role.TextColor3 = picked and Color3.fromRGB(28, 18, 6) or C.muted
 			role.Text = mine and "YOU" or (picked and "SELECTED" or "Select")
 			role.Parent = card
 			corner(role, 6)
@@ -5344,7 +5346,38 @@ function renderPage()
 
 	if state.page == "Settings" then
 		heading(centerHolder, "Theme", nextOrder())
-		note(centerHolder, "Soulja Boy theme uses that Rick and Morty song. The choice is saved and comes back the next time you execute.", nextOrder())
+		note(centerHolder, "Music, Evil Morty, and Soulja Boy are saved and come back the next time you execute. Music off silences every track.", nextOrder())
+		toggleRow(centerHolder, "Music", nextOrder(), state.musicOn ~= false, function()
+			state.musicOn = not state.musicOn
+			if state.savePrefs then
+				state.savePrefs()
+			end
+			if state.setMusic then
+				state.setMusic()
+			end
+			pushLog(state.musicOn and "Music on" or "Music off")
+			renderPage()
+		end)
+		toggleRow(centerHolder, "Evil Morty theme", nextOrder(), state.evilAudio == true, function()
+			local nextOn = not state.evilAudio
+			if nextOn and not state.evilId then
+				pushLog("Evil Morty track was not found")
+				renderPage()
+				return
+			end
+			state.evilAudio = nextOn
+			if nextOn then
+				state.souljaAudio = false
+			end
+			if state.savePrefs then
+				state.savePrefs()
+			end
+			if state.applyTheme then
+				state.applyTheme()
+			end
+			pushLog(state.evilAudio and "Evil Morty theme on" or "Intro theme on")
+			renderPage()
+		end)
 		toggleRow(centerHolder, "Soulja Boy theme", nextOrder(), state.souljaAudio == true, function()
 			local nextOn = not state.souljaAudio
 			if nextOn and not state.souljaId then
@@ -5352,10 +5385,12 @@ function renderPage()
 				renderPage()
 				return
 			end
-			if state.saveTheme then
-				state.saveTheme(nextOn)
-			else
-				state.souljaAudio = nextOn
+			state.souljaAudio = nextOn
+			if nextOn then
+				state.evilAudio = false
+			end
+			if state.savePrefs then
+				state.savePrefs()
 			end
 			if state.applyTheme then
 				state.applyTheme()
@@ -5458,9 +5493,13 @@ corner(window, 12)
 	local toggleId = loadAsset({ "voidz-portal/toggle.jpg", "toggle.jpg" })
 	local introId = loadAsset({ "voidz-portal/intro.mp3", "intro.mp3" })
 	local souljaId = loadAsset({ "voidz-portal/soulja.mp3", "soulja.mp3" })
-	local function savedSoulja()
+	local evilId = loadAsset({ "voidz-portal/evil.m4a", "evil.m4a", "voidz-portal/evil.mp4", "evil.mp4", "voidz-portal/evil.mp3", "evil.mp3" })
+	local mortyId = loadAsset({ "voidz-portal/evil.png", "evil.png" })
+	local function readPrefs()
+		local themeName = "evil"
+		local music = true
 		if type(readfile) ~= "function" then
-			return false
+			return themeName, music
 		end
 		local names = { "voidz-portal/theme.txt", "voidz_portal_theme.txt" }
 		for _, name in ipairs(names) do
@@ -5473,22 +5512,44 @@ corner(window, 12)
 			end
 			if exists then
 				local ok, body = pcall(readfile, name)
-				if ok and type(body) == "string" and string.find(string.lower(body), "soulja", 1, true) then
-					return true
+				if ok and type(body) == "string" then
+					local lower = string.lower(body)
+					if string.find(lower, "theme=soulja", 1, true) or lower == "soulja" then
+						themeName = "soulja"
+					elseif string.find(lower, "theme=intro", 1, true) or lower == "intro" then
+						themeName = "intro"
+					elseif string.find(lower, "theme=evil", 1, true) or lower == "evil" then
+						themeName = "evil"
+					elseif string.find(lower, "soulja", 1, true) and not string.find(lower, "theme=", 1, true) then
+						themeName = "soulja"
+					end
+					if string.find(lower, "music=off", 1, true) or string.find(lower, "music=0", 1, true) then
+						music = false
+					end
+					return themeName, music
 				end
 			end
 		end
-		return false
+		return themeName, music
 	end
-	state.souljaAudio = savedSoulja()
+	local themeName, musicOn = readPrefs()
+	state.souljaAudio = themeName == "soulja"
+	state.evilAudio = themeName == "evil"
+	state.musicOn = musicOn
 	state.introId = introId
 	state.souljaId = souljaId
-	state.saveTheme = function(on)
-		state.souljaAudio = on == true
+	state.evilId = evilId
+	state.savePrefs = function()
 		if type(writefile) ~= "function" then
 			return
 		end
-		local body = state.souljaAudio and "soulja" or "intro"
+		local picked = "intro"
+		if state.souljaAudio then
+			picked = "soulja"
+		elseif state.evilAudio then
+			picked = "evil"
+		end
+		local body = "theme=" .. picked .. "\nmusic=" .. ((state.musicOn ~= false) and "on" or "off")
 		pcall(writefile, "voidz-portal/theme.txt", body)
 		pcall(writefile, "voidz_portal_theme.txt", body)
 	end
@@ -5496,8 +5557,8 @@ corner(window, 12)
 		local portal = Instance.new("ImageLabel")
 		portal.Name = "Portal"
 		portal.AnchorPoint = Vector2.new(0, 1)
-		portal.Position = UDim2.new(0, 24, 1, -14)
-		portal.Size = UDim2.fromOffset(118, 118)
+		portal.Position = UDim2.new(0, 16, 1, -12)
+		portal.Size = UDim2.fromOffset(146, 146)
 		portal.BackgroundTransparency = 1
 		portal.BorderSizePixel = 0
 		portal.Image = portalId
@@ -5506,43 +5567,49 @@ corner(window, 12)
 		portal.Active = false
 		portal.ClipsDescendants = true
 		portal.Parent = window
-		corner(portal, 59)
+		corner(portal, 73)
 		local portalStroke = Instance.new("UIStroke")
 		portalStroke.Color = C.accent
 		portalStroke.Thickness = 2
 		portalStroke.Parent = portal
-		if toggleId then
-			local rick = Instance.new("ImageLabel")
-			rick.Name = "Rick"
-			rick.AnchorPoint = Vector2.new(0.5, 0.5)
-			rick.Position = UDim2.fromScale(0.5, 0.5)
-			rick.Size = UDim2.fromOffset(72, 72)
-			rick.BackgroundTransparency = 1
-			rick.BorderSizePixel = 0
-			rick.Image = toggleId
-			rick.ScaleType = Enum.ScaleType.Crop
-			rick.ZIndex = 7
-			rick.Active = false
-			rick.Parent = portal
-			corner(rick, 36)
-			local rickStroke = Instance.new("UIStroke")
-			rickStroke.Color = Color3.fromRGB(6, 14, 8)
-			rickStroke.Thickness = 2
-			rickStroke.Parent = rick
+		local faceId = mortyId or toggleId
+		if faceId then
+			local figure = Instance.new("ImageLabel")
+			figure.Name = mortyId and "EvilMorty" or "Rick"
+			figure.AnchorPoint = Vector2.new(0.5, 0.5)
+			figure.Position = UDim2.fromScale(0.5, 0.5)
+			figure.Size = mortyId and UDim2.fromOffset(112, 112) or UDim2.fromOffset(72, 72)
+			figure.BackgroundTransparency = 1
+			figure.BorderSizePixel = 0
+			figure.Image = faceId
+			figure.ScaleType = mortyId and Enum.ScaleType.Fit or Enum.ScaleType.Crop
+			figure.ZIndex = 7
+			figure.Active = false
+			figure.Parent = portal
+			corner(figure, mortyId and 56 or 36)
+			local figureStroke = Instance.new("UIStroke")
+			figureStroke.Color = Color3.fromRGB(48, 32, 8)
+			figureStroke.Thickness = 2
+			figureStroke.Parent = figure
 		end
 	end
 	local theme = Instance.new("Sound")
 	theme.Name = "VOIDZ_Theme"
-	theme.SoundId = (state.souljaAudio and souljaId) or introId or ""
+	theme.SoundId = (state.souljaAudio and souljaId) or (state.evilAudio and evilId) or introId or ""
 	theme.Volume = 0.7
 	theme.Looped = true
 	theme.Parent = gui
 	state.applyTheme = function()
-		local id = (state.souljaAudio and state.souljaId) or state.introId or ""
+		local id = state.introId or ""
+		if state.souljaAudio and state.souljaId then
+			id = state.souljaId
+		elseif state.evilAudio and state.evilId then
+			id = state.evilId
+		end
 		if id == "" then
 			return false
 		end
-		local open = window.Visible
+		local open = window.Visible and state.musicOn ~= false
 		theme:Pause()
 		theme.SoundId = id
 		theme.Looped = true
@@ -5555,7 +5622,7 @@ corner(window, 12)
 		return true
 	end
 	local function resumeTheme()
-		if theme.SoundId == "" or theme.IsPlaying then
+		if state.musicOn == false or theme.SoundId == "" or theme.IsPlaying then
 			return
 		end
 		local at = state.themeAt
@@ -5572,6 +5639,16 @@ corner(window, 12)
 		end
 		theme.TimePosition = at
 		state.themeAt = at
+	end
+	state.setMusic = function()
+		if state.musicOn == false then
+			if theme.IsPlaying then
+				state.themeAt = theme.TimePosition
+				theme:Pause()
+			end
+		elseif window.Visible then
+			resumeTheme()
+		end
 	end
 	state.toggleHub = function()
 		window.Visible = not window.Visible
@@ -5635,15 +5712,15 @@ corner(window, 12)
 			state.toggleHub()
 		end
 	end)
-	if introId then
+	if theme.SoundId ~= "" then
 		task.defer(resumeTheme)
 	end
 end)()
 local wash = Instance.new("UIGradient")
 wash.Color = ColorSequence.new({
-	ColorSequenceKeypoint.new(0, Color3.fromRGB(16, 64, 24)),
-	ColorSequenceKeypoint.new(0.42, Color3.fromRGB(5, 10, 7)),
-	ColorSequenceKeypoint.new(1, Color3.fromRGB(42, 72, 16)),
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(120, 78, 18)),
+	ColorSequenceKeypoint.new(0.42, Color3.fromRGB(10, 8, 6)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(196, 146, 42)),
 })
 wash.Rotation = 28
 wash.Parent = window
