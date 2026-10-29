@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.4
+-- BUILD 2026-10-29-1.6.5
 -- Place 75108253383447 · Universe 10767619742
 -- RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.4"
+local BUILD = "2026-10-29-1.6.5"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -789,8 +789,26 @@ local function materialEligible(part)
 	return true
 end
 
+local hasPickupSignal
+
 local function scanMaterials()
-	local index = {}
+	local function addPart(index, target)
+		local matKey = target.Material.Name
+		index[matKey] = index[matKey] or {}
+		table.insert(index[matKey], target)
+		local model = target:FindFirstAncestorOfClass("Model")
+		if model and Players:GetPlayerFromCharacter(model) then
+			model = nil
+		end
+		local label = model and model.Name or target.Name
+		if label ~= "" and label ~= "Part" and label ~= "MeshPart" and label ~= "UnionOperation" and label ~= "Model" then
+			local nameKey = "name:" .. label
+			index[nameKey] = index[nameKey] or {}
+			table.insert(index[nameKey], target)
+		end
+	end
+	local looseIndex = {}
+	local signalIndex = {}
 	local seenModel = {}
 	local seen = 0
 	for _, inst in ipairs(workspace:GetDescendants()) do
@@ -810,20 +828,25 @@ local function scanMaterials()
 				end
 			end
 			if target and materialEligible(target) then
-				local matKey = target.Material.Name
-				index[matKey] = index[matKey] or {}
-				table.insert(index[matKey], target)
-				if not target.Anchored then
-					local label = model and model.Name or target.Name
-					if label ~= "" and label ~= "Part" and label ~= "MeshPart" and label ~= "UnionOperation" and label ~= "Model" then
-						local nameKey = "name:" .. label
-						index[nameKey] = index[nameKey] or {}
-						table.insert(index[nameKey], target)
-					end
+				if hasPickupSignal and hasPickupSignal(target) then
+					addPart(signalIndex, target)
+				elseif not target.Anchored then
+					addPart(looseIndex, target)
 				end
 			end
 		end
 	end
+	local index = {}
+	local function merge(from)
+		for key, parts in pairs(from) do
+			index[key] = index[key] or {}
+			for _, part in ipairs(parts) do
+				table.insert(index[key], part)
+			end
+		end
+	end
+	merge(signalIndex)
+	merge(looseIndex)
 	local list = {}
 	for id, parts in pairs(index) do
 		table.insert(list, {
@@ -861,8 +884,8 @@ local function closestMaterial(origin)
 	if not parts then
 		return nil
 	end
-	local best = nil
-	local bestDist = math.huge
+	local bestSignal, bestLoose = nil, nil
+	local signalDist, looseDist = math.huge, math.huge
 	for i = #parts, 1, -1 do
 		local part = parts[i]
 		if not part.Parent or part:FindFirstChild("VOIDZ_Hold") then
@@ -871,58 +894,147 @@ local function closestMaterial(origin)
 			-- leave it for a later pass
 		else
 			local dist = (part.Position - origin).Magnitude
-			if dist < bestDist then
-				bestDist = dist
-				best = part
+			if hasPickupSignal and hasPickupSignal(part) then
+				if dist < signalDist then
+					signalDist = dist
+					bestSignal = part
+				end
+			elseif not part.Anchored then
+				if dist < looseDist then
+					looseDist = dist
+					bestLoose = part
+				end
 			end
 		end
 	end
-	return best
+	return bestSignal or bestLoose
 end
 
-local function fireCollect(inst, root)
-	local prompts = {}
-	local function collectFrom(obj)
-		if not obj then
-			return
-		end
-		for _, child in ipairs(obj:GetChildren()) do
-			if child:IsA("ProximityPrompt") or child:IsA("ClickDetector") then
-				table.insert(prompts, child)
+local function promptBlocked(blob)
+	return string.find(blob, "iq", 1, true)
+		or string.find(blob, "sit", 1, true)
+		or string.find(blob, "chair", 1, true)
+		or string.find(blob, "buy", 1, true)
+		or string.find(blob, "shop", 1, true)
+		or string.find(blob, "robux", 1, true)
+		or string.find(blob, "purchase", 1, true)
+end
+
+local function limbList(root)
+	local limbs = { root }
+	local character = root.Parent
+	if character then
+		for _, name in ipairs({ "RightFoot", "LeftFoot", "Right Leg", "Left Leg", "Torso", "UpperTorso", "LowerTorso" }) do
+			local limb = character:FindFirstChild(name)
+			if limb and limb:IsA("BasePart") then
+				table.insert(limbs, limb)
 			end
 		end
 	end
-	collectFrom(inst)
-	collectFrom(inst.Parent)
-	for _, item in ipairs(prompts) do
-		if item:IsA("ProximityPrompt") then
-			pcall(function()
-				item.MaxActivationDistance = 100
-				item.HoldDuration = 0
-			end)
-			if type(fireproximityprompt) == "function" then
-				pcall(fireproximityprompt, item)
-				pcall(fireproximityprompt, item, true)
-			end
-			pcall(function()
-				item:InputHoldBegin()
-				item:InputHoldEnd()
-			end)
-		elseif type(fireclickdetector) == "function" then
-			pcall(fireclickdetector, item)
+	return limbs
+end
+
+local function touchTargets(inst)
+	local list = {}
+	local seen = {}
+	local function add(part)
+		if part and part:IsA("BasePart") and not seen[part] and #list < 5 then
+			seen[part] = true
+			table.insert(list, part)
 		end
 	end
-	if root and type(firetouchinterest) == "function" and inst:IsA("BasePart") then
-		pcall(firetouchinterest, root, inst, 0)
-		task.delay(0.12, function()
-			if root.Parent and inst.Parent then
-				pcall(firetouchinterest, root, inst, 1)
+	add(inst)
+	local model = inst:FindFirstAncestorOfClass("Model")
+	if model and Players:GetPlayerFromCharacter(model) then
+		return list
+	end
+	local host = model or inst.Parent
+	if host then
+		local count = 0
+		for _, child in ipairs(host:GetDescendants()) do
+			count = count + 1
+			if count > 40 or #list >= 5 then
+				break
 			end
+			if child:IsA("TouchTransmitter") or child:IsA("ClickDetector") or child:IsA("ProximityPrompt") then
+				add(child.Parent)
+			end
+		end
+	end
+	return list
+end
+
+local function sendTouch(root, inst, mode)
+	if not root or not inst or not inst:IsA("BasePart") or type(firetouchinterest) ~= "function" then
+		return
+	end
+	pcall(function()
+		inst.CanTouch = true
+		root.CanTouch = true
+	end)
+	local limbs = limbList(root)
+	local parts = touchTargets(inst)
+	for _, limb in ipairs(limbs) do
+		pcall(function()
+			limb.CanTouch = true
 		end)
+		for _, piece in ipairs(parts) do
+			if piece.Parent then
+				pcall(firetouchinterest, limb, piece, mode)
+				pcall(firetouchinterest, piece, limb, mode)
+			end
+		end
+	end
+end
+
+local function fireCollect(inst, root, beginTouch)
+	local hosts = { inst }
+	local model = inst:FindFirstAncestorOfClass("Model")
+	if model and not Players:GetPlayerFromCharacter(model) then
+		table.insert(hosts, model)
+	elseif inst.Parent then
+		table.insert(hosts, inst.Parent)
+	end
+	local seen = {}
+	for _, host in ipairs(hosts) do
+		local count = 0
+		for _, item in ipairs(host:GetDescendants()) do
+			count = count + 1
+			if count > 40 then
+				break
+			end
+			if not seen[item] and (item:IsA("ProximityPrompt") or item:IsA("ClickDetector")) then
+				seen[item] = true
+				if item:IsA("ProximityPrompt") then
+					local blob = string.lower(item.Name .. " " .. item.ActionText .. " " .. item.ObjectText)
+					if not promptBlocked(blob) then
+						local holdFor = item.HoldDuration or 0
+						pcall(function()
+							item.MaxActivationDistance = 80
+							item.RequiresLineOfSight = false
+						end)
+						if type(fireproximityprompt) == "function" then
+							pcall(fireproximityprompt, item)
+							pcall(fireproximityprompt, item, holdFor)
+							pcall(fireproximityprompt, item, 1)
+						end
+						pcall(function()
+							item:InputHoldBegin()
+							item:InputHoldEnd()
+						end)
+					end
+				elseif type(fireclickdetector) == "function" then
+					pcall(fireclickdetector, item)
+				end
+			end
+		end
+	end
+	if beginTouch then
+		sendTouch(root, inst, 0)
 	end
 	local tool = inst:IsA("Tool") and inst or (inst.Parent and inst.Parent:IsA("Tool") and inst.Parent)
-	if tool then
-		local _, humanoid = characterParts()
+	if tool and root and root.Parent then
+		local humanoid = root.Parent:FindFirstChildOfClass("Humanoid")
 		if humanoid then
 			pcall(function()
 				humanoid:EquipTool(tool)
@@ -931,43 +1043,79 @@ local function fireCollect(inst, root)
 	end
 end
 
-local function forcePickup(part, root)
-	local stand = part.Position + Vector3.new(4, 3, 0)
-	root.CFrame = CFrame.lookAt(stand, part.Position)
-	pcall(function()
-		root.AssemblyLinearVelocity = Vector3.zero
-	end)
+local function pinMaterial(root, part)
 	local humanoid = root.Parent and root.Parent:FindFirstChildOfClass("Humanoid")
 	if humanoid and humanoid.Sit then
 		humanoid.Sit = false
 	end
-	fireCollect(part, root)
-	state.tried[part] = os.clock()
-	task.delay(0.2, function()
-		if not state.alive or not part.Parent or not part:IsA("BasePart") then
-			return
+	local character = root.Parent
+	if character and not state.noclip then
+		for _, limb in ipairs(character:GetDescendants()) do
+			if limb:IsA("BasePart") then
+				if collideSaved[limb] == nil then
+					collideSaved[limb] = limb.CanCollide
+				end
+				limb.CanCollide = false
+			end
 		end
-		if part:FindFirstChild("VOIDZ_Hold") then
-			return
-		end
-		local _, _, current = characterParts()
-		if not current then
-			return
-		end
-		pcall(function()
-			part.Anchored = false
-		end)
-		if part.Anchored then
-			return
-		end
-		part.CanCollide = false
-		part.CFrame = current.CFrame * CFrame.new(0, 1.5, -2)
-		local weld = Instance.new("WeldConstraint")
-		weld.Name = "VOIDZ_Hold"
-		weld.Part0 = current
-		weld.Part1 = part
-		weld.Parent = part
+	end
+	local lift = math.clamp(part.Size.Y * 0.5 + 1.5, 1.5, 4)
+	root.CFrame = CFrame.new(part.Position + Vector3.new(0, lift, 0))
+	pcall(function()
+		root.AssemblyLinearVelocity = Vector3.zero
+		root.AssemblyAngularVelocity = Vector3.zero
 	end)
+	state.locking = true
+end
+
+local function stayOnMaterial(root, part)
+	pinMaterial(root, part)
+	local now = os.clock()
+	if now < (state.nextTouch or 0) then
+		return
+	end
+	state.nextTouch = now + 0.35
+	fireCollect(part, root, true)
+	state.touchOpen = true
+	local capturedRoot = root
+	local captured = part
+	task.delay(0.16, function()
+		if not state.alive or state.matFocus ~= captured or not captured.Parent or not capturedRoot.Parent then
+			return
+		end
+		sendTouch(capturedRoot, captured, 1)
+	end)
+end
+
+local function releaseMaterialTouch(root, part)
+	if state.touchOpen and root and part and part.Parent and part:IsA("BasePart") then
+		sendTouch(root, part, 1)
+	end
+	state.touchOpen = false
+end
+
+local function clearMaterialFocus(root)
+	local part = state.matFocus
+	state.matFocus = nil
+	state.matUntil = 0
+	releaseMaterialTouch(root, part)
+	if not state.noclip and not state.iqBusy then
+		restoreCollide()
+	end
+end
+
+local function materialHoldActive()
+	local part = state.matFocus
+	return part ~= nil and part.Parent ~= nil and part:IsDescendantOf(workspace) and os.clock() < (state.matUntil or 0)
+end
+
+local function forcePickup(part, root)
+	state.matFocus = part
+	state.matUntil = os.clock() + 1.2
+	state.nextTouch = 0
+	state.touchOpen = false
+	state.tried[part] = os.clock()
+	stayOnMaterial(root, part)
 end
 
 local function revertFeatures()
@@ -987,6 +1135,15 @@ local function revertFeatures()
 	state.iqBusy = false
 	state.autoBuild = false
 	state.autoMat = false
+	do
+		local _, _, root = characterParts()
+		if root and state.matFocus then
+			releaseMaterialTouch(root, state.matFocus)
+		end
+	end
+	state.matFocus = nil
+	state.matUntil = 0
+	state.touchOpen = false
 	state.locking = false
 	state.killPart = nil
 	state.aimPoint = nil
@@ -1859,46 +2016,99 @@ local function partMentionsIq(part)
 	return false
 end
 
-local function isGroundPart(part)
-	if not materialEligible(part) or partMentionsIq(part) or wasTried(part) then
+local function pickupBlob(inst)
+	local blob = string.lower(inst.Name)
+	if inst:IsA("ProximityPrompt") then
+		blob = blob .. " " .. string.lower((inst.ActionText or "") .. " " .. (inst.ObjectText or ""))
+	end
+	return blob
+end
+
+local function blobIsPickup(blob)
+	if blob == "" or promptBlocked(blob) or mentionsIq(blob) then
 		return false
 	end
-	if not part.Anchored then
+	if isScrapName(blob) then
 		return true
 	end
-	for _, child in ipairs(part:GetChildren()) do
-		if child:IsA("ProximityPrompt") and child.Enabled then
-			local blob = string.lower(child.Name .. " " .. child.ActionText .. " " .. child.ObjectText)
-			local pickup = string.find(blob, "pick", 1, true)
-				or string.find(blob, "collect", 1, true)
-				or string.find(blob, "grab", 1, true)
-				or string.find(blob, "scrap", 1, true)
-				or isScrapName(blob)
-			if pickup and not mentionsIq(blob) then
+	return string.find(blob, "pick", 1, true)
+		or string.find(blob, "collect", 1, true)
+		or string.find(blob, "grab", 1, true)
+		or string.find(blob, "loot", 1, true)
+		or hasWord(blob, "take")
+end
+
+hasPickupSignal = function(part)
+	if not part or not part.Parent then
+		return false
+	end
+	local function interesting(node, deep)
+		if blobIsPickup(string.lower(node.Name)) then
+			return true
+		end
+		local list = deep and node:GetDescendants() or node:GetChildren()
+		local seen = 0
+		for _, child in ipairs(list) do
+			seen = seen + 1
+			if seen > 40 then
+				break
+			end
+			if child:IsA("ProximityPrompt") and blobIsPickup(pickupBlob(child)) then
 				return true
 			end
+			if child:IsA("ClickDetector") then
+				local hostName = child.Parent and child.Parent.Name or child.Name
+				if blobIsPickup(string.lower(hostName .. " " .. child.Name)) then
+					return true
+				end
+			end
+			if child:IsA("TouchTransmitter") and child.Parent and child.Parent:IsA("BasePart") then
+				local host = child.Parent
+				local blob = string.lower(host.Name .. " " .. node.Name)
+				if (not host.Anchored or blobIsPickup(blob)) and materialEligible(host) then
+					return true
+				end
+			end
 		end
+		return false
+	end
+	if interesting(part, false) then
+		return true
+	end
+	local model = part:FindFirstAncestorOfClass("Model")
+	if model and not Players:GetPlayerFromCharacter(model) and interesting(model, true) then
+		return true
+	end
+	if part.Parent and not part.Parent:IsA("Model") and interesting(part.Parent, false) then
+		return true
 	end
 	return false
 end
 
 local function closestGround(origin)
-	local best = nil
-	local bestDist = math.huge
+	local bestSignal, bestLoose = nil, nil
+	local signalDist, looseDist = math.huge, math.huge
 	local seen = {}
 	for _, parts in pairs(state.matIndex) do
 		for _, part in ipairs(parts) do
-			if not seen[part] and part.Parent and isGroundPart(part) then
+			if not seen[part] and part.Parent and not wasTried(part) and materialEligible(part) and not partMentionsIq(part) then
 				seen[part] = true
 				local dist = (part.Position - origin).Magnitude
-				if dist < bestDist then
-					bestDist = dist
-					best = part
+				if hasPickupSignal(part) then
+					if dist < signalDist then
+						signalDist = dist
+						bestSignal = part
+					end
+				elseif not part.Anchored then
+					if dist < looseDist then
+						looseDist = dist
+						bestLoose = part
+					end
 				end
 			end
 		end
 	end
-	return best
+	return bestSignal or bestLoose
 end
 
 local function nextGroundPart(origin)
@@ -1921,9 +2131,15 @@ end
 local function runMaterials(root)
 	local scraping = state.autoMat or (state.autoQuest and state.questCollect)
 	if not scraping or not inPortal() then
+		if state.matFocus then
+			clearMaterialFocus(root)
+		end
 		return
 	end
 	if state.autoIq and not state.autoMat then
+		if state.matFocus then
+			clearMaterialFocus(root)
+		end
 		return
 	end
 	local _, humanoid = characterParts()
@@ -1932,13 +2148,29 @@ local function runMaterials(root)
 	end
 	state.iqBusy = false
 	if state.autoKill or (state.autoQuest and (state.questKillPlayers or state.questKillNpc)) then
+		if state.matFocus then
+			clearMaterialFocus(root)
+		end
 		return
 	end
 	local now = os.clock()
+	if state.matFocus then
+		if not state.matFocus.Parent or not state.matFocus:IsDescendantOf(workspace) then
+			local label = state.matLabel or "material"
+			clearMaterialFocus(root)
+			pushLog("Collected " .. tostring(label))
+			state.nextMat = 0
+		elseif now < (state.matUntil or 0) then
+			stayOnMaterial(root, state.matFocus)
+			return
+		else
+			clearMaterialFocus(root)
+		end
+	end
 	if now < (state.nextMat or 0) then
 		return
 	end
-	state.nextMat = now + 0.7
+	state.nextMat = now + 0.15
 	if now - (state.matScanAt or 0) > 2 then
 		scanMaterials()
 	end
@@ -1955,14 +2187,14 @@ local function runMaterials(root)
 		end
 		return
 	end
-	state.locking = true
 	local label = part.Parent and part.Parent:IsA("Model") and part.Parent.Name or part.Name
 	if state.material then
 		label = prettyMaterial(state.material) .. " " .. label
 	end
+	state.matLabel = label
 	if state.lastMat ~= part then
 		state.lastMat = part
-		pushLog("Material " .. tostring(label))
+		pushLog("Picking up " .. tostring(label))
 	end
 	forcePickup(part, root)
 end
@@ -2234,7 +2466,9 @@ local function runCombat(root)
 	state.killPart = nil
 	state.aimPoint = nil
 	if not state.autoFarm then
-		state.locking = false
+		if not materialHoldActive() then
+			state.locking = false
+		end
 		return
 	end
 	if now < (state.nextHit or 0) then
@@ -2242,7 +2476,9 @@ local function runCombat(root)
 	end
 	local _, humanoid = characterParts()
 	if humanoid and humanoid.Health > 0 and humanoid.Health < humanoid.MaxHealth * 0.35 then
-		state.locking = false
+		if not materialHoldActive() then
+			state.locking = false
+		end
 		return
 	end
 	state.nextHit = now + 0.32
@@ -2254,7 +2490,9 @@ local function runCombat(root)
 		part, label = nearestNpc(root.Position)
 	end
 	if not part then
-		state.locking = false
+		if not materialHoldActive() then
+			state.locking = false
+		end
 		state.killPart = nil
 		state.aimPoint = nil
 		return
@@ -2302,7 +2540,10 @@ local function onHeartbeat()
 			end
 		end
 	end
-	if state.fly and inPortal() and not state.iqBusy and not state.killPart then
+	if materialHoldActive() then
+		state.locking = true
+	end
+	if state.fly and inPortal() and not state.iqBusy and not state.killPart and not materialHoldActive() then
 		local gyro, velocity = ensureFly(root)
 		local camera = workspace.CurrentCamera
 		if gyro and camera then
@@ -2382,6 +2623,9 @@ local function onHeartbeat()
 				placeBuild(state.buildKind or "Pad", root, true)
 			end
 		end
+	end
+	if materialHoldActive() then
+		state.locking = true
 	end
 end
 
@@ -3046,7 +3290,7 @@ function renderPage()
 		if state.material and state.matIndex[state.material] then
 			left = #state.matIndex[state.material]
 		end
-		note(centerHolder, "Auto collect walks the closest ground parts, picks each one up, then goes to the next. It skips chairs and will stand you up if a seat grabs you. Choose a material to grab only that type.", nextOrder())
+		note(centerHolder, "Auto collect stands on the closest scrap, fires the pickup, and stays until the game takes it. Then it goes to the next one. It skips chairs. Choose a material to grab only that type.", nextOrder())
 		note(centerHolder, "Selected: " .. chosen .. "  ·  " .. tostring(left) .. " left. Found " .. tostring(#state.matList) .. " types.", nextOrder())
 		actionButton(centerHolder, "Scan materials", nextOrder(), function()
 			if not requireGame() then
@@ -3084,6 +3328,8 @@ function renderPage()
 			if state.autoMat then
 				scanMaterials()
 			else
+				local _, _, root = characterParts()
+				clearMaterialFocus(root)
 				state.locking = false
 			end
 			pushLog(state.autoMat and "Auto collect on" or "Auto collect off")
@@ -3441,6 +3687,7 @@ end
 local function shutdown()
 	pcall(function()
 		RunService:UnbindFromRenderStep("VOIDZ_PORTAL_STICK")
+		RunService:UnbindFromRenderStep("VOIDZ_PORTAL_MAT")
 	end)
 	if not state.alive then
 		return
@@ -3807,6 +4054,16 @@ end)
 bind(RunService.Heartbeat, onHeartbeat)
 pcall(function()
 	RunService:UnbindFromRenderStep("VOIDZ_PORTAL_STICK")
+	RunService:UnbindFromRenderStep("VOIDZ_PORTAL_MAT")
+end)
+RunService:BindToRenderStep("VOIDZ_PORTAL_MAT", Enum.RenderPriority.Last.Value, function()
+	if not state.alive or state.killPart or not materialHoldActive() then
+		return
+	end
+	local _, _, matRoot = characterParts()
+	if matRoot and state.matFocus then
+		pinMaterial(matRoot, state.matFocus)
+	end
 end)
 RunService:BindToRenderStep("VOIDZ_PORTAL_STICK", Enum.RenderPriority.Camera.Value + 5, function()
 	if not state.alive or not state.killPart or not state.killPart.Parent then
