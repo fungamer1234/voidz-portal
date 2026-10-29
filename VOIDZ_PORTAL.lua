@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.13
+-- BUILD 2026-10-29-1.6.14
 -- Place 75108253383447 · Universe 10767619742
 -- RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.13"
+local BUILD = "2026-10-29-1.6.14"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -1191,6 +1191,13 @@ local function revertFeatures()
 	state.locking = false
 	state.killPart = nil
 	state.aimPoint = nil
+	state.followId = nil
+	if state.chaseMarker then
+		pcall(function()
+			state.chaseMarker:Destroy()
+		end)
+		state.chaseMarker = nil
+	end
 	state.iqBusy = false
 	state.fovOn = false
 	if releaseKillCamera then
@@ -1282,12 +1289,38 @@ playerRoot = function(player)
 		return nil
 	end
 	local function remember(part)
-		if not part or not part.Parent then
-			return nil
+		if not part or not part.Parent or part == state.chaseMarker then
+			return part
 		end
 		state.lastBodies = state.lastBodies or {}
 		state.lastBodies[player.UserId] = { part = part, at = os.clock() }
 		return part
+	end
+	local function pivotMarker(target)
+		if not target then
+			return nil
+		end
+		local ok, cf = pcall(function()
+			return target:GetPivot()
+		end)
+		if not ok or typeof(cf) ~= "CFrame" then
+			return nil
+		end
+		local marker = state.chaseMarker
+		if not marker or not marker.Parent then
+			marker = Instance.new("Part")
+			marker.Name = "VOIDZ_Mark"
+			marker.Anchored = true
+			marker.CanCollide = false
+			marker.CanQuery = false
+			marker.CanTouch = false
+			marker.Transparency = 1
+			marker.Size = Vector3.new(2, 5, 1)
+			marker.Parent = workspace
+			state.chaseMarker = marker
+		end
+		marker.CFrame = cf
+		return marker
 	end
 	local model = player.Character
 	if model and model.Parent then
@@ -1354,6 +1387,22 @@ playerRoot = function(player)
 	end
 	if part and part.Parent then
 		return remember(part)
+	end
+	if model and model.Parent then
+		local marker = pivotMarker(model)
+		if marker then
+			return marker
+		end
+	end
+	local named = workspace:FindFirstChild(player.Name)
+	if (not named or not named:IsA("Model")) and player.DisplayName ~= "" then
+		named = workspace:FindFirstChild(player.DisplayName)
+	end
+	if named and named:IsA("Model") then
+		local marker = pivotMarker(named)
+		if marker then
+			return marker
+		end
 	end
 	local saved = state.lastBodies and state.lastBodies[player.UserId]
 	if saved and saved.part and saved.part.Parent and os.clock() - saved.at < 1.25 then
@@ -2727,9 +2776,7 @@ local function runCombat(root)
 				state.nextKillNote = now + 4
 				if not picked then
 					pushLog("Pick a player on the right")
-				elseif picked.Character and picked.Character.Parent then
-					pushLog("Can't see " .. picked.DisplayName .. " yet")
-				else
+				elseif not picked.Character or not picked.Character.Parent then
 					pushLog(picked.DisplayName .. " is down")
 				end
 			end
@@ -2739,6 +2786,15 @@ local function runCombat(root)
 		state.killPart = part
 		state.killLabel = label
 		state.killGrace = os.clock() + 0.8
+		if part == state.chaseMarker and now > (state.nextStream or 0) then
+			state.nextStream = now + 1
+			local streamPos = part.Position
+			task.spawn(function()
+				pcall(function()
+					LocalPlayer:RequestStreamAroundAsync(streamPos)
+				end)
+			end)
+		end
 		placeBehind(root, part, true)
 		if state.lastTarget ~= label then
 			state.lastTarget = label
@@ -4028,7 +4084,6 @@ function renderPage()
 		Move = "Fly, speed, and travel",
 		PvP = "Kill, escape, and home",
 		Materials = "Ground scrap",
-		Portals = "One world at a time",
 		Visuals = "Client look",
 		Players = "Teleport, spectate, kill",
 		Settings = "Stop or unload",
@@ -4048,7 +4103,6 @@ function renderPage()
 		guideRow(centerHolder, "Move", "Fly, noclip, speed, jump, click teleport, anti void.", nextOrder())
 		guideRow(centerHolder, "PvP", "Auto kill, mech escape, and home when hurt.", nextOrder())
 		guideRow(centerHolder, "Materials", "Stand on scrap and pick it up.", nextOrder())
-		guideRow(centerHolder, "Portals", "Teleport to one world. No cycle.", nextOrder())
 		guideRow(centerHolder, "Visuals", "ESP, fullbright, and field of view.", nextOrder())
 		guideRow(centerHolder, "Players", "Select someone for teleport, spectate, and kill.", nextOrder())
 		guideRow(centerHolder, "Settings", "Stop features or unload the hub.", nextOrder())
@@ -4161,7 +4215,7 @@ function renderPage()
 
 	if state.page == "PvP" then
 		heading(centerHolder, "Combat", nextOrder())
-		note(centerHolder, "Loops a short distance behind the target and fires the weapon you have out. A selected player is the only target, and it waits when they are gone.", nextOrder())
+		note(centerHolder, "Teleports to the player wherever they are, stays a short distance behind them, and fires the weapon you have out. A selected player is the only target.", nextOrder())
 		toggleRow(centerHolder, "Auto kill", nextOrder(), state.autoKill, function()
 			if not state.autoKill and not requireGame() then
 				return
@@ -4278,42 +4332,6 @@ function renderPage()
 			dropHeld()
 			pushLog("Dropped held parts")
 		end)
-		return
-	end
-
-	if state.page == "Portals" then
-		if #state.worlds == 0 and os.clock() - (state.worldScanAt or 0) > 2 then
-			scanWorlds()
-		end
-		heading(centerHolder, "Worlds", nextOrder())
-		note(centerHolder, "Refresh opens the dimension menu and reads its list. Press one world. The hub hides for a moment so the game gets the click. It does not cycle worlds.", nextOrder())
-		note(centerHolder, tostring(#state.worlds) .. " worlds found.", nextOrder())
-		actionButton(centerHolder, "Refresh worlds", nextOrder(), function()
-			if not requireGame() then
-				return
-			end
-			sendKey(Enum.KeyCode.R, "Dimensions")
-			task.delay(0.85, function()
-				if not state.alive then
-					return
-				end
-				state.worldLoose = true
-				local count = scanWorlds()
-				state.worldLoose = false
-				pushLog("Worlds " .. tostring(count))
-				if state.page == "Portals" then
-					renderPage()
-				end
-			end)
-		end)
-		if #state.worlds == 0 then
-			note(centerHolder, "No worlds yet. Press Refresh worlds so the dimension menu can be read.", nextOrder())
-		end
-		for _, entry in ipairs(state.worlds) do
-			actionButton(centerHolder, entry.label, nextOrder(), function()
-				pressWorld(entry)
-			end)
-		end
 		return
 	end
 
@@ -4639,7 +4657,7 @@ sideLayout.Padding = UDim.new(0, 4)
 sideLayout.SortOrder = Enum.SortOrder.LayoutOrder
 sideLayout.Parent = sideList
 
-local pages = { "Home", "Move", "PvP", "Materials", "Portals", "Visuals", "Players", "Settings" }
+local pages = { "Home", "Move", "PvP", "Materials", "Visuals", "Players", "Settings" }
 for index, name in ipairs(pages) do
 	local button = Instance.new("TextButton")
 	button.Size = UDim2.new(1, 0, 0, 30)
