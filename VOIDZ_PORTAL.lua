@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.14
+-- BUILD 2026-10-29-1.6.15
 -- Place 75108253383447 · Universe 10767619742
 -- RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.14"
+local BUILD = "2026-10-29-1.6.15"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -590,6 +590,7 @@ local function sweepHubObjects()
 		VOIDZ_TAG = true,
 		VOIDZ_FlyBG = true,
 		VOIDZ_FlyBV = true,
+		VOIDZ_KillHold = true,
 	}
 	for _, player in ipairs(Players:GetPlayers()) do
 		local character = player.Character
@@ -1543,51 +1544,88 @@ local function ensureWeapon()
 end
 
 local function clickAttack()
-	local tool = ensureWeapon()
-	if tool then
-		pcall(function()
-			tool:Activate()
-		end)
-	end
 	if UserInputService:GetFocusedTextBox() then
 		return
 	end
 	local camera = workspace.CurrentCamera
 	local x, y = 80, 28
 	if camera then
-		x = math.max(20, camera.ViewportSize.X * 0.5)
-		y = math.max(20, camera.ViewportSize.Y * 0.5)
+		local size = camera.ViewportSize
+		x = math.clamp(size.X * 0.5, 8, math.max(8, size.X - 8))
+		y = math.clamp(size.Y * 0.5, 8, math.max(8, size.Y - 8))
 		if state.aimPoint then
-			local screen, visible = camera:WorldToViewportPoint(state.aimPoint)
-			if visible and screen.Z > 0 then
-				x = screen.X
-				y = screen.Y
+			local screen = camera:WorldToViewportPoint(state.aimPoint)
+			if screen.Z > 0 then
+				x = math.clamp(screen.X, 8, math.max(8, size.X - 8))
+				y = math.clamp(screen.Y, 8, math.max(8, size.Y - 8))
 			end
 		end
 	end
-	if window and window.Visible then
+	if window and window.Visible and window.Active then
 		local origin = window.AbsolutePosition
 		local area = window.AbsoluteSize
 		local function inside(px, py)
 			return px >= origin.X and px <= origin.X + area.X and py >= origin.Y and py <= origin.Y + area.Y
 		end
 		if inside(x, y) then
-			x, y = 12, 12
-		end
-		if inside(x, y) then
-			return
+			local above = origin.Y - 28
+			local below = origin.Y + area.Y + 28
+			if above >= 8 then
+				y = above
+			elseif camera and below <= camera.ViewportSize.Y - 8 then
+				y = below
+			end
 		end
 	end
+	state.gunX = x
+	state.gunY = y
+	state.gunDown = true
+	state.shotToken = (state.shotToken or 0) + 1
+	local token = state.shotToken
 	pcall(function()
+		VirtualInputManager:SendMouseMoveEvent(x, y, game)
 		VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 0)
-		task.delay(0.03, function()
-			if not state.alive then
-				return
-			end
-			pcall(function()
-				VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
-			end)
+	end)
+	if type(mousemoveabs) == "function" then
+		pcall(mousemoveabs, x, y)
+	end
+	if type(mouse1press) == "function" then
+		pcall(mouse1press)
+	end
+	local mouse = LocalPlayer:GetMouse()
+	if mouse and type(firesignal) == "function" then
+		pcall(function()
+			firesignal(mouse.Button1Down)
 		end)
+	end
+	local tool = ensureWeapon()
+	if tool then
+		pcall(function()
+			tool:Activate()
+		end)
+		if type(firesignal) == "function" then
+			pcall(function()
+				firesignal(tool.Activated)
+			end)
+		end
+	end
+	task.delay(0.06, function()
+		if not state.alive or token ~= state.shotToken then
+			return
+		end
+		state.gunDown = false
+		pcall(function()
+			VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
+		end)
+		if type(mouse1release) == "function" then
+			pcall(mouse1release)
+		end
+		local up = LocalPlayer:GetMouse()
+		if up and type(firesignal) == "function" then
+			pcall(function()
+				firesignal(up.Button1Up)
+			end)
+		end
 	end)
 end
 
@@ -1619,6 +1657,43 @@ releaseKillCamera = function()
 	end
 	if wasKillCam and LocalPlayer.CameraMode == Enum.CameraMode.LockFirstPerson then
 		LocalPlayer.CameraMode = Enum.CameraMode.Classic
+	end
+	if state.hubActive and window then
+		window.Active = true
+		state.hubActive = nil
+	end
+	state.shotToken = (state.shotToken or 0) + 1
+	if state.gunDown then
+		state.gunDown = false
+		local x = state.gunX or 8
+		local y = state.gunY or 8
+		pcall(function()
+			VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
+		end)
+		if type(mouse1release) == "function" then
+			pcall(mouse1release)
+		end
+		local mouse = LocalPlayer:GetMouse()
+		if mouse and type(firesignal) == "function" then
+			pcall(function()
+				firesignal(mouse.Button1Up)
+			end)
+		end
+	end
+	if state.querySaved then
+		for part, was in pairs(state.querySaved) do
+			if typeof(part) == "Instance" and part.Parent and part:IsA("BasePart") then
+				part.CanQuery = was
+			end
+		end
+		state.querySaved = nil
+	end
+	local _, _, heldRoot = characterParts()
+	if heldRoot then
+		local killHold = heldRoot:FindFirstChild("VOIDZ_KillHold")
+		if killHold then
+			killHold:Destroy()
+		end
 	end
 end
 
@@ -1653,11 +1728,16 @@ placeBehind = function(root, part, aimCamera)
 	state.killFace = flat
 	local pos = part.Position - flat * 7 + Vector3.new(0, 2, 0)
 	local aimPart = model and (model:FindFirstChild("UpperTorso") or model:FindFirstChild("Torso") or model:FindFirstChild("Head"))
-	local aim = (aimPart and aimPart:IsA("BasePart") and aimPart.Position) or (part.Position + Vector3.new(0, 1.2, 0))
+	if aimPart and (not aimPart:IsA("BasePart") or aimPart == state.chaseMarker) then
+		aimPart = nil
+	end
+	local aim = (aimPart and aimPart.Position) or (part.Position + Vector3.new(0, 1.2, 0))
 	if aimCamera then
 		state.aimPoint = aim
+		state.aimPart = aimPart
 	elseif not state.autoKill then
 		state.aimPoint = nil
+		state.aimPart = nil
 	end
 	if not state.simSet and type(setsimulationradius) == "function" then
 		state.simSet = true
@@ -1668,6 +1748,20 @@ placeBehind = function(root, part, aimCamera)
 		root.AssemblyLinearVelocity = Vector3.zero
 		root.AssemblyAngularVelocity = Vector3.zero
 	end)
+	if aimCamera and not state.fleeing then
+		local killHold = root:FindFirstChild("VOIDZ_KillHold")
+		if not killHold then
+			killHold = Instance.new("BodyPosition")
+			killHold.Name = "VOIDZ_KillHold"
+			killHold.MaxForce = Vector3.new(1, 1, 1) * 1000000
+			killHold.P = 100000
+			killHold.D = 2000
+			killHold.Parent = root
+		end
+		killHold.Position = pos
+	elseif root:FindFirstChild("VOIDZ_KillHold") then
+		root.VOIDZ_KillHold:Destroy()
+	end
 	if aimCamera then
 		local camera = workspace.CurrentCamera
 		if camera then
@@ -1682,7 +1776,14 @@ placeBehind = function(root, part, aimCamera)
 			holdKillCamera()
 			local character = root.Parent
 			if character then
+				state.querySaved = state.querySaved or {}
 				for _, inst in ipairs(character:GetDescendants()) do
+					if inst:IsA("BasePart") then
+						if state.querySaved[inst] == nil then
+							state.querySaved[inst] = inst.CanQuery
+						end
+						inst.CanQuery = false
+					end
 					if inst:IsA("BasePart") or inst:IsA("Decal") then
 						inst.LocalTransparencyModifier = 0
 					end
@@ -1709,9 +1810,17 @@ if aimMouse and type(hookmetamethod) == "function" then
 					end
 				end
 				if key == "Hit" then
-					return CFrame.new(state.aimPoint)
+					local camera = workspace.CurrentCamera
+					local origin = camera and camera.CFrame.Position or state.aimPoint
+					local delta = state.aimPoint - origin
+					if delta.Magnitude < 0.05 then
+						return CFrame.new(state.aimPoint)
+					end
+					return CFrame.lookAt(state.aimPoint, state.aimPoint + delta)
 				elseif key == "Target" then
-					return state.killPart
+					if state.aimPart then
+						return state.aimPart
+					end
 				elseif key == "UnitRay" then
 					local camera = workspace.CurrentCamera
 					local origin = camera and camera.CFrame.Position or state.aimPoint
@@ -3064,7 +3173,20 @@ local function onHeartbeat()
 			state.savedRotate = humanoid.AutoRotate
 		end
 		humanoid.AutoRotate = false
-		humanoid.PlatformStand = true
+		if state.autoKill then
+			if humanoid.PlatformStand then
+				humanoid.PlatformStand = false
+				pcall(function()
+					humanoid:ChangeState(Enum.HumanoidStateType.Running)
+				end)
+			end
+			if window and window.Active then
+				state.hubActive = true
+				window.Active = false
+			end
+		else
+			humanoid.PlatformStand = true
+		end
 		if window and not state.minimized and not state.hubHeld then
 			state.hubHome = window.Position
 			state.hubHeld = true
@@ -3121,6 +3243,10 @@ local function onHeartbeat()
 	if shouldGoHome(humanoid) then
 		goHome(root)
 		state.fleeing = true
+		local killHold = root:FindFirstChild("VOIDZ_KillHold")
+		if killHold then
+			killHold:Destroy()
+		end
 	else
 		state.fleeing = false
 	end
@@ -4881,7 +5007,11 @@ RunService:BindToRenderStep("VOIDZ_PORTAL_STICK", Enum.RenderPriority.Camera.Val
 		end
 		if stickHumanoid then
 			stickHumanoid.AutoRotate = false
-			stickHumanoid.PlatformStand = true
+			if state.autoKill then
+				stickHumanoid.PlatformStand = false
+			else
+				stickHumanoid.PlatformStand = true
+			end
 		end
 		placeBehind(stickRoot, state.killPart, true)
 		if os.clock() >= (state.nextHit or 0) then
