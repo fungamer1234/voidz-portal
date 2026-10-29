@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.33
+-- BUILD 2026-10-29-1.6.34
 -- Place 75108253383447 · Universe 10767619742
 -- The picture button or RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.33"
+local BUILD = "2026-10-29-1.6.34"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -40,16 +40,16 @@ if stale then
 end
 
 local C = {
-	bg = Color3.fromRGB(12, 9, 6),
-	bar = Color3.fromRGB(18, 13, 8),
-	side = Color3.fromRGB(14, 10, 6),
-	card = Color3.fromRGB(26, 18, 10),
-	card2 = Color3.fromRGB(46, 32, 14),
-	line = Color3.fromRGB(148, 108, 42),
-	text = Color3.fromRGB(255, 246, 226),
-	muted = Color3.fromRGB(214, 190, 150),
-	accent = Color3.fromRGB(232, 184, 64),
-	good = Color3.fromRGB(120, 210, 140),
+	bg = Color3.fromRGB(6, 12, 8),
+	bar = Color3.fromRGB(8, 16, 10),
+	side = Color3.fromRGB(7, 14, 9),
+	card = Color3.fromRGB(12, 22, 14),
+	card2 = Color3.fromRGB(20, 38, 22),
+	line = Color3.fromRGB(64, 104, 46),
+	text = Color3.fromRGB(244, 250, 236),
+	muted = Color3.fromRGB(186, 206, 172),
+	accent = Color3.fromRGB(176, 236, 72),
+	good = Color3.fromRGB(140, 230, 90),
 	warn = Color3.fromRGB(255, 196, 120),
 	bad = Color3.fromRGB(255, 120, 130),
 }
@@ -106,7 +106,7 @@ local state = {
 	autoMat = false,
 	zoneMat = false,
 	souljaAudio = false,
-	evilAudio = true,
+	evilAudio = false,
 	musicOn = true,
 	material = nil,
 	matOpen = false,
@@ -4668,7 +4668,7 @@ local function toggleRow(parent, title, order, isOn, callback)
 	local pill = Instance.new("TextButton")
 	pill.Size = UDim2.fromOffset(42, 22)
 	pill.Position = UDim2.new(1, -52, 0.5, -11)
-	pill.BackgroundColor3 = isOn and C.accent or Color3.fromRGB(54, 40, 18)
+	pill.BackgroundColor3 = isOn and C.accent or (state.evilAudio and Color3.fromRGB(54, 40, 18) or Color3.fromRGB(32, 46, 30))
 	pill.Text = ""
 	pill.AutoButtonColor = false
 	pill.Parent = row
@@ -4751,7 +4751,7 @@ local function renderPlayers()
 			local picked = (not mine) and state.selected == player.UserId
 			local card = Instance.new("TextButton")
 			card.Size = UDim2.new(1, 0, 0, 64)
-			card.BackgroundColor3 = picked and Color3.fromRGB(62, 44, 16) or C.card
+			card.BackgroundColor3 = picked and (state.evilAudio and Color3.fromRGB(62, 44, 16) or Color3.fromRGB(24, 52, 22)) or C.card
 			card.AutoButtonColor = false
 			card.Text = ""
 			card.LayoutOrder = shown
@@ -4818,7 +4818,7 @@ local function renderPlayers()
 			role.Font = Enum.Font.GothamBold
 			role.TextSize = 11
 			role.TextXAlignment = Enum.TextXAlignment.Center
-			role.TextColor3 = picked and Color3.fromRGB(28, 18, 6) or C.muted
+			role.TextColor3 = picked and (state.evilAudio and Color3.fromRGB(28, 18, 6) or Color3.fromRGB(16, 32, 12)) or C.muted
 			role.Text = mine and "YOU" or (picked and "SELECTED" or "Select")
 			role.Parent = card
 			corner(role, 6)
@@ -4854,6 +4854,7 @@ local function markNav()
 		local mark = button:FindFirstChild("Mark")
 		if mark then
 			mark.Visible = on
+			mark.BackgroundColor3 = C.accent
 		end
 		TweenService:Create(button, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 			BackgroundColor3 = on and C.card2 or C.side,
@@ -5346,7 +5347,7 @@ function renderPage()
 
 	if state.page == "Settings" then
 		heading(centerHolder, "Theme", nextOrder())
-		note(centerHolder, "Music, Evil Morty, and Soulja Boy are saved and come back the next time you execute. Music off silences every track.", nextOrder())
+		note(centerHolder, "Normal is the green Rick and Morty portal, Rick in the swirl, and the intro. Evil Morty turns on the gold gradient, your Evil Morty photo, and that song. Soulja Boy changes the song only. Turning a theme off returns the green look and the intro. Music off silences every track. These choices are saved.", nextOrder())
 		toggleRow(centerHolder, "Music", nextOrder(), state.musicOn ~= false, function()
 			state.musicOn = not state.musicOn
 			if state.savePrefs then
@@ -5375,7 +5376,7 @@ function renderPage()
 			if state.applyTheme then
 				state.applyTheme()
 			end
-			pushLog(state.evilAudio and "Evil Morty theme on" or "Intro theme on")
+			pushLog(state.evilAudio and "Evil Morty theme on" or "Rick and Morty theme on")
 			renderPage()
 		end)
 		toggleRow(centerHolder, "Soulja Boy theme", nextOrder(), state.souljaAudio == true, function()
@@ -5395,7 +5396,7 @@ function renderPage()
 			if state.applyTheme then
 				state.applyTheme()
 			end
-			pushLog(state.souljaAudio and "Soulja Boy theme on" or "Intro theme on")
+			pushLog(state.souljaAudio and "Soulja Boy theme on" or "Rick and Morty theme on")
 			renderPage()
 		end)
 		heading(centerHolder, "Session", nextOrder())
@@ -5489,14 +5490,15 @@ corner(window, 12)
 		end
 		return nil
 	end
-	local portalId = loadAsset({ "voidz-portal/portal.png", "portal.png" })
+	local greenPortalId = loadAsset({ "voidz-portal/portal-green.png", "portal-green.png", "voidz-portal/portal.png", "portal.png" })
+	local goldPortalId = loadAsset({ "voidz-portal/portal-gold.png", "portal-gold.png" })
 	local toggleId = loadAsset({ "voidz-portal/toggle.jpg", "toggle.jpg" })
 	local introId = loadAsset({ "voidz-portal/intro.mp3", "intro.mp3" })
 	local souljaId = loadAsset({ "voidz-portal/soulja.mp3", "soulja.mp3" })
-	local evilId = loadAsset({ "voidz-portal/evil.m4a", "evil.m4a", "voidz-portal/evil.mp4", "evil.mp4", "voidz-portal/evil.mp3", "evil.mp3" })
-	local mortyId = loadAsset({ "voidz-portal/evil.png", "evil.png" })
+	local evilId = loadAsset({ "voidz-portal/evil.mp3", "evil.mp3", "voidz-portal/evil.m4a", "evil.m4a", "voidz-portal/evil.mp4", "evil.mp4" })
+	local mortyId = loadAsset({ "voidz-portal/morty.png", "morty.png" })
 	local function readPrefs()
-		local themeName = "evil"
+		local themeName = "intro"
 		local music = true
 		if type(readfile) ~= "function" then
 			return themeName, music
@@ -5539,6 +5541,10 @@ corner(window, 12)
 	state.introId = introId
 	state.souljaId = souljaId
 	state.evilId = evilId
+	state.greenPortalId = greenPortalId
+	state.goldPortalId = goldPortalId
+	state.rickId = toggleId
+	state.mortyId = mortyId
 	state.savePrefs = function()
 		if type(writefile) ~= "function" then
 			return
@@ -5553,7 +5559,8 @@ corner(window, 12)
 		pcall(writefile, "voidz-portal/theme.txt", body)
 		pcall(writefile, "voidz_portal_theme.txt", body)
 	end
-	if portalId then
+	local portalImage = (state.evilAudio and goldPortalId) or greenPortalId
+	if portalImage then
 		local portal = Instance.new("ImageLabel")
 		portal.Name = "Portal"
 		portal.AnchorPoint = Vector2.new(0, 1)
@@ -5561,7 +5568,7 @@ corner(window, 12)
 		portal.Size = UDim2.fromOffset(146, 146)
 		portal.BackgroundTransparency = 1
 		portal.BorderSizePixel = 0
-		portal.Image = portalId
+		portal.Image = portalImage
 		portal.ScaleType = Enum.ScaleType.Crop
 		portal.ZIndex = 6
 		portal.Active = false
@@ -5572,23 +5579,24 @@ corner(window, 12)
 		portalStroke.Color = C.accent
 		portalStroke.Thickness = 2
 		portalStroke.Parent = portal
-		local faceId = mortyId or toggleId
+		local faceId = (state.evilAudio and mortyId) or toggleId
 		if faceId then
+			local full = state.evilAudio and mortyId
 			local figure = Instance.new("ImageLabel")
-			figure.Name = mortyId and "EvilMorty" or "Rick"
+			figure.Name = "Face"
 			figure.AnchorPoint = Vector2.new(0.5, 0.5)
 			figure.Position = UDim2.fromScale(0.5, 0.5)
-			figure.Size = mortyId and UDim2.fromOffset(112, 112) or UDim2.fromOffset(72, 72)
+			figure.Size = full and UDim2.fromOffset(128, 128) or UDim2.fromOffset(72, 72)
 			figure.BackgroundTransparency = 1
 			figure.BorderSizePixel = 0
 			figure.Image = faceId
-			figure.ScaleType = mortyId and Enum.ScaleType.Fit or Enum.ScaleType.Crop
+			figure.ScaleType = full and Enum.ScaleType.Fit or Enum.ScaleType.Crop
 			figure.ZIndex = 7
 			figure.Active = false
 			figure.Parent = portal
-			corner(figure, mortyId and 56 or 36)
+			corner(figure, full and 64 or 36)
 			local figureStroke = Instance.new("UIStroke")
-			figureStroke.Color = Color3.fromRGB(48, 32, 8)
+			figureStroke.Color = full and Color3.fromRGB(48, 32, 8) or Color3.fromRGB(18, 36, 16)
 			figureStroke.Thickness = 2
 			figureStroke.Parent = figure
 		end
@@ -5599,15 +5607,144 @@ corner(window, 12)
 	theme.Volume = 0.7
 	theme.Looped = true
 	theme.Parent = gui
+	state.applyLook = function()
+		local evil = state.evilAudio == true
+		if evil then
+			C.bg = Color3.fromRGB(12, 9, 6)
+			C.bar = Color3.fromRGB(18, 13, 8)
+			C.side = Color3.fromRGB(14, 10, 6)
+			C.card = Color3.fromRGB(26, 18, 10)
+			C.card2 = Color3.fromRGB(46, 32, 14)
+			C.line = Color3.fromRGB(148, 108, 42)
+			C.text = Color3.fromRGB(255, 246, 226)
+			C.muted = Color3.fromRGB(214, 190, 150)
+			C.accent = Color3.fromRGB(232, 184, 64)
+			C.good = Color3.fromRGB(120, 210, 140)
+		else
+			C.bg = Color3.fromRGB(6, 12, 8)
+			C.bar = Color3.fromRGB(8, 16, 10)
+			C.side = Color3.fromRGB(7, 14, 9)
+			C.card = Color3.fromRGB(12, 22, 14)
+			C.card2 = Color3.fromRGB(20, 38, 22)
+			C.line = Color3.fromRGB(64, 104, 46)
+			C.text = Color3.fromRGB(244, 250, 236)
+			C.muted = Color3.fromRGB(186, 206, 172)
+			C.accent = Color3.fromRGB(176, 236, 72)
+			C.good = Color3.fromRGB(140, 230, 90)
+		end
+		local portal = window:FindFirstChild("Portal")
+		if portal then
+			local img = evil and state.goldPortalId or state.greenPortalId
+			if type(img) == "string" and img ~= "" then
+				portal.Image = img
+			end
+			local ring = portal:FindFirstChildOfClass("UIStroke")
+			if ring then
+				ring.Color = C.accent
+			end
+			local figure = portal:FindFirstChild("Face")
+			local full = evil and type(state.mortyId) == "string" and state.mortyId ~= ""
+			local face = full and state.mortyId or state.rickId
+			if figure and type(face) == "string" and face ~= "" then
+				figure.Visible = true
+				figure.Image = face
+				figure.Size = full and UDim2.fromOffset(128, 128) or UDim2.fromOffset(72, 72)
+				figure.ScaleType = full and Enum.ScaleType.Fit or Enum.ScaleType.Crop
+				local round = figure:FindFirstChildOfClass("UICorner")
+				if round then
+					round.CornerRadius = UDim.new(0, full and 64 or 36)
+				end
+				local edge = figure:FindFirstChildOfClass("UIStroke")
+				if edge then
+					edge.Color = full and Color3.fromRGB(48, 32, 8) or Color3.fromRGB(18, 36, 16)
+				end
+			end
+		end
+		for _, child in ipairs(window:GetChildren()) do
+			if child:IsA("UIGradient") then
+				if evil then
+					child.Color = ColorSequence.new({
+						ColorSequenceKeypoint.new(0, Color3.fromRGB(120, 78, 18)),
+						ColorSequenceKeypoint.new(0.42, Color3.fromRGB(10, 8, 6)),
+						ColorSequenceKeypoint.new(1, Color3.fromRGB(196, 146, 42)),
+					})
+				else
+					child.Color = ColorSequence.new({
+						ColorSequenceKeypoint.new(0, Color3.fromRGB(16, 64, 24)),
+						ColorSequenceKeypoint.new(0.42, Color3.fromRGB(5, 10, 7)),
+						ColorSequenceKeypoint.new(1, Color3.fromRGB(42, 72, 16)),
+					})
+				end
+				break
+			end
+		end
+		local topBar = window:FindFirstChild("Top")
+		if topBar then
+			topBar.BackgroundColor3 = C.bar
+			for _, child in ipairs(topBar:GetChildren()) do
+				if child.Name == "TopFill" then
+					child.BackgroundColor3 = C.bar
+				elseif child.Name == "HubTitle" then
+					child.TextColor3 = C.accent
+				elseif child.Name == "PageTitle" then
+					child.TextColor3 = C.muted
+				elseif child:IsA("TextBox") then
+					child.BackgroundColor3 = C.card
+					child.TextColor3 = C.text
+					child.PlaceholderColor3 = C.muted
+				elseif child:IsA("TextButton") then
+					child.BackgroundColor3 = C.card
+					child.TextColor3 = C.text
+				end
+			end
+		end
+		local body = window:FindFirstChild("Body")
+		if body then
+			local sideBar = body:FindFirstChild("Side")
+			if sideBar then
+				sideBar.BackgroundColor3 = C.side
+				local list = sideBar:FindFirstChildOfClass("ScrollingFrame")
+				if list then
+					list.ScrollBarImageColor3 = C.accent
+				end
+			end
+			local rightBar = body:FindFirstChild("Right")
+			if rightBar then
+				rightBar.BackgroundColor3 = C.side
+				local label = rightBar:FindFirstChild("PlayersTitle")
+				if label then
+					label.TextColor3 = C.muted
+				end
+			end
+		end
+		if pageTitle then
+			pageTitle.TextColor3 = C.muted
+		end
+		if statusLabel then
+			statusLabel.TextColor3 = C.muted
+		end
+		if playerList then
+			playerList.ScrollBarImageColor3 = C.accent
+		end
+		local opener = gui:FindFirstChild("VOIDZ_Open")
+		if opener then
+			local stroke = opener:FindFirstChildOfClass("UIStroke")
+			if stroke then
+				stroke.Color = C.accent
+			end
+		end
+		markNav()
+		if playerList then
+			renderPlayers()
+		end
+	end
 	state.applyTheme = function()
+		state.applyLook()
 		local id = state.introId or ""
 		if state.souljaAudio and state.souljaId then
 			id = state.souljaId
 		elseif state.evilAudio and state.evilId then
 			id = state.evilId
-		end
-		if id == "" then
-			return false
 		end
 		local open = window.Visible and state.musicOn ~= false
 		theme:Pause()
@@ -5615,11 +5752,11 @@ corner(window, 12)
 		theme.Looped = true
 		theme.TimePosition = 0
 		state.themeAt = 0
-		if open then
+		if id ~= "" and open then
 			theme:Play()
 			theme.TimePosition = 0
 		end
-		return true
+		return id ~= ""
 	end
 	local function resumeTheme()
 		if state.musicOn == false or theme.SoundId == "" or theme.IsPlaying then
@@ -5715,12 +5852,17 @@ corner(window, 12)
 	if theme.SoundId ~= "" then
 		task.defer(resumeTheme)
 	end
+	state.applyLook()
 end)()
 local wash = Instance.new("UIGradient")
-wash.Color = ColorSequence.new({
+wash.Color = (state.evilAudio and ColorSequence.new({
 	ColorSequenceKeypoint.new(0, Color3.fromRGB(120, 78, 18)),
 	ColorSequenceKeypoint.new(0.42, Color3.fromRGB(10, 8, 6)),
 	ColorSequenceKeypoint.new(1, Color3.fromRGB(196, 146, 42)),
+})) or ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(16, 64, 24)),
+	ColorSequenceKeypoint.new(0.42, Color3.fromRGB(5, 10, 7)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(42, 72, 16)),
 })
 wash.Rotation = 28
 wash.Parent = window
@@ -5750,6 +5892,7 @@ top.ZIndex = 4
 top.Parent = window
 corner(top, 12)
 local topFill = Instance.new("Frame")
+topFill.Name = "TopFill"
 topFill.Size = UDim2.new(1, 0, 0, 16)
 topFill.Position = UDim2.new(0, 0, 1, -16)
 topFill.BackgroundColor3 = C.bar
@@ -5757,6 +5900,7 @@ topFill.BackgroundTransparency = 0.22
 topFill.BorderSizePixel = 0
 topFill.Parent = top
 local sheen = Instance.new("Frame")
+sheen.Name = "Sheen"
 sheen.Size = UDim2.new(0.28, 0, 1, 0)
 sheen.Position = UDim2.new(-0.4, 0, 0, 0)
 sheen.BackgroundColor3 = Color3.new(1, 1, 1)
@@ -5787,6 +5931,7 @@ end
 task.defer(loopSheen)
 
 local title = Instance.new("TextLabel")
+title.Name = "HubTitle"
 title.BackgroundTransparency = 1
 title.Position = UDim2.fromOffset(18, 8)
 title.Size = UDim2.fromOffset(220, 22)
@@ -5800,6 +5945,7 @@ title.Text = "VOIDZ HUB"
 title.Parent = top
 
 pageTitle = Instance.new("TextLabel")
+pageTitle.Name = "PageTitle"
 pageTitle.BackgroundTransparency = 1
 pageTitle.Position = UDim2.fromOffset(18, 28)
 pageTitle.Size = UDim2.fromOffset(220, 16)
@@ -5864,6 +6010,7 @@ body.ZIndex = 4
 body.Parent = window
 
 local side = Instance.new("Frame")
+side.Name = "Side"
 side.Size = UDim2.new(0, 168, 1, 0)
 side.BackgroundColor3 = C.side
 side.BackgroundTransparency = 0.06
@@ -5950,6 +6097,7 @@ centerHolder = makeScroll(center)
 centerHolder.Size = UDim2.new(1, -8, 1, -28)
 
 local right = Instance.new("Frame")
+right.Name = "Right"
 right.AnchorPoint = Vector2.new(1, 0)
 right.Position = UDim2.new(1, 0, 0, 0)
 right.Size = UDim2.new(0, 232, 1, 0)
@@ -5959,6 +6107,7 @@ right.BorderSizePixel = 0
 right.Parent = body
 
 local rightTitle = Instance.new("TextLabel")
+rightTitle.Name = "PlayersTitle"
 rightTitle.BackgroundTransparency = 1
 rightTitle.Position = UDim2.fromOffset(12, 8)
 rightTitle.Size = UDim2.new(1, -20, 0, 18)
@@ -6317,6 +6466,9 @@ keepChat()
 TweenService:Create(window, TweenInfo.new(0.42, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
 	Size = UDim2.fromOffset(880, 520),
 }):Play()
+if state.applyLook then
+	state.applyLook()
+end
 renderPlayers()
 renderPage()
 if inPortal() then
