@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.37
+-- BUILD 2026-10-29-1.6.38
 -- Place 75108253383447 · Universe 10767619742
 -- The picture button or RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.37"
+local BUILD = "2026-10-29-1.6.38"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -1231,6 +1231,11 @@ local function revertFeatures()
 	state.blink = false
 	state.blinkCf = nil
 	state.blinkUntil = 0
+	if state.phaseConn then
+		state.phaseConn:Disconnect()
+		state.phaseConn = nil
+	end
+	state.phaseChar = nil
 	state.autoFarm = false
 	state.autoQuest = false
 	state.autoIq = false
@@ -3678,6 +3683,9 @@ local function goHome(root)
 	if not state.house or not root then
 		return
 	end
+	if (root.Position - state.house.Position).Magnitude < 4 then
+		return
+	end
 	root.CFrame = state.house
 	pcall(function()
 		root.AssemblyLinearVelocity = Vector3.zero
@@ -3762,14 +3770,42 @@ local function onHeartbeat()
 		restoreCollide()
 	end
 	if (state.noclip or state.shove) and inPortal() and not state.iqBusy then
-		for _, part in ipairs(character:GetDescendants()) do
-			if part:IsA("BasePart") then
-				if collideSaved[part] == nil then
-					collideSaved[part] = part.CanCollide
+		if state.phaseChar ~= character then
+			if state.phaseConn then
+				state.phaseConn:Disconnect()
+			end
+			state.phaseChar = character
+			state.phaseScan = 0
+			state.phaseConn = character.DescendantAdded:Connect(function(inst)
+				if not state.alive or state.iqBusy or not (state.noclip or state.shove) then
+					return
 				end
-				part.CanCollide = false
+				if inst:IsA("BasePart") and inst.CanCollide then
+					if collideSaved[inst] == nil then
+						collideSaved[inst] = true
+					end
+					inst.CanCollide = false
+				end
+			end)
+		end
+		local phaseNow = os.clock()
+		if phaseNow >= (state.phaseScan or 0) then
+			state.phaseScan = phaseNow + 0.25
+			for _, part in ipairs(character:GetDescendants()) do
+				if part:IsA("BasePart") and part.CanCollide then
+					if collideSaved[part] == nil then
+						collideSaved[part] = true
+					end
+					part.CanCollide = false
+				end
 			end
 		end
+	elseif state.phaseChar then
+		if state.phaseConn then
+			state.phaseConn:Disconnect()
+			state.phaseConn = nil
+		end
+		state.phaseChar = nil
 	end
 	if materialHoldActive() then
 		state.locking = true
@@ -3790,6 +3826,7 @@ local function onHeartbeat()
 	end
 	local function clearShove()
 		state.shoveNear = false
+		state.shoveAway = nil
 		local oldPush = root:FindFirstChild("VOIDZ_Shove")
 		if oldPush then
 			oldPush:Destroy()
@@ -3808,28 +3845,43 @@ local function onHeartbeat()
 		and os.clock() >= (state.blinkUntil or 0)
 		and not humanoid.SeatPart
 	if canShove then
-		local limit = state.shoveStuds or 15
-		if limit < 8 then
-			limit = 8
-		elseif limit > 200 then
-			limit = 200
-		end
-		local away = Vector3.zero
-		local closest = limit
-		for _, player in ipairs(Players:GetPlayers()) do
-			if player ~= LocalPlayer and not sameTeam(player) then
-				local part = playerRoot(player)
-				if part then
-					local flat = Vector3.new(root.Position.X - part.Position.X, 0, root.Position.Z - part.Position.Z)
-					local dist = flat.Magnitude
-					if dist > 0.2 and dist < closest then
-						closest = dist
-						away = flat.Unit
+		local shoveNow = os.clock()
+		if shoveNow >= (state.shoveScan or 0) then
+			state.shoveScan = shoveNow + 0.12
+			local limit = state.shoveStuds or 15
+			if limit < 8 then
+				limit = 8
+			elseif limit > 200 then
+				limit = 200
+			end
+			local away = nil
+			local closest = limit
+			for _, player in ipairs(Players:GetPlayers()) do
+				if player ~= LocalPlayer and not sameTeam(player) then
+					local part = playerRoot(player)
+					if part then
+						local flat = Vector3.new(root.Position.X - part.Position.X, 0, root.Position.Z - part.Position.Z)
+						local dist = flat.Magnitude
+						if dist > 0.2 and dist < closest then
+							closest = dist
+							away = flat.Unit
+						end
 					end
 				end
 			end
+			if away then
+				local power = 36 + (limit - closest) * 3
+				if power > 78 then
+					power = 78
+				end
+				state.shoveAway = away
+				state.shovePower = power
+			else
+				state.shoveAway = nil
+				state.shovePower = 0
+			end
 		end
-		if away.Magnitude > 0.5 then
+		if state.shoveAway then
 			state.shoveNear = true
 			local push = root:FindFirstChild("VOIDZ_Shove")
 			if not push then
@@ -3838,11 +3890,7 @@ local function onHeartbeat()
 				push.MaxForce = Vector3.new(250000, 0, 250000)
 				push.Parent = root
 			end
-			local power = 36 + (limit - closest) * 3
-			if power > 78 then
-				power = 78
-			end
-			push.Velocity = away * power
+			push.Velocity = state.shoveAway * (state.shovePower or 36)
 		else
 			clearShove()
 		end
@@ -3990,7 +4038,7 @@ local function onHeartbeat()
 			end
 			local now = os.clock()
 			if now < (state.blinkUntil or 0) then
-				if state.blinkCf then
+				if state.blinkCf and (fromRoot.Position - state.blinkCf.Position).Magnitude > 1.5 then
 					fromRoot.CFrame = state.blinkCf
 					pcall(function()
 						fromRoot.AssemblyLinearVelocity = Vector3.zero
@@ -4079,7 +4127,7 @@ local function onHeartbeat()
 	else
 		state.fleeing = false
 	end
-	if state.blinkCf and os.clock() < (state.blinkUntil or 0) and not state.fleeing then
+	if state.blinkCf and os.clock() < (state.blinkUntil or 0) and not state.fleeing and (root.Position - state.blinkCf.Position).Magnitude > 1.5 then
 		root.CFrame = state.blinkCf
 		pcall(function()
 			root.AssemblyLinearVelocity = Vector3.zero
@@ -6335,7 +6383,7 @@ task.spawn(function()
 		wash.Rotation = 20 + math.sin(wave * 0.35) * 16
 		wash.Offset = Vector2.new(math.sin(wave * 0.22) * 0.18, math.cos(wave * 0.18) * 0.06)
 		windowStroke.Color = C.line:Lerp(C.accent, 0.35 + math.sin(wave * 1.4) * 0.35)
-		RunService.Heartbeat:Wait()
+		task.wait(0.05)
 	end
 end)
 
@@ -6839,7 +6887,7 @@ RunService:BindToRenderStep("VOIDZ_PORTAL_STICK", Enum.RenderPriority.Last.Value
 	end
 	if state.blinkCf and os.clock() < (state.blinkUntil or 0) and not state.autoKill then
 		local _, _, blinkRoot = characterParts()
-		if blinkRoot then
+		if blinkRoot and (blinkRoot.Position - state.blinkCf.Position).Magnitude > 1.5 then
 			blinkRoot.CFrame = state.blinkCf
 			pcall(function()
 				blinkRoot.AssemblyLinearVelocity = Vector3.zero
