@@ -1,9 +1,9 @@
 -- VOIDZ HUB · Portal Sandbox
--- BUILD 2026-10-29-1.6.41
+-- BUILD 2026-10-30-1.6.42
 -- Place 75108253383447 · Universe 10767619742
 -- The picture button or RightShift shows and hides the hub.
 
-local BUILD = "2026-10-29-1.6.41"
+local BUILD = "2026-10-30-1.6.42"
 local PLACE_ID = 75108253383447
 local UNIVERSE_ID = 10767619742
 
@@ -113,6 +113,7 @@ local state = {
 	souljaAudio = false,
 	evilAudio = false,
 	musicOn = true,
+	musicClosed = false,
 	shove = false,
 	shoveStuds = 15,
 	shoveNear = false,
@@ -6111,7 +6112,7 @@ function renderPage()
 
 	if state.page == "Settings" then
 		heading(centerHolder, "Theme", nextOrder())
-		note(centerHolder, "Normal is the green Rick and Morty portal, Rick in the swirl, and the intro. Evil Morty turns on the gold gradient, your Evil Morty photo, and that song. Soulja Boy changes the song only. Turning a theme off returns the green look and the intro. Music off silences every track. These choices are saved.", nextOrder())
+		note(centerHolder, "Normal is the green Rick and Morty portal, Rick in the swirl, and the intro. Evil Morty turns on the gold gradient, your Evil Morty photo, and that song. Soulja Boy changes the song only. Turning a theme off returns the green look and the intro. Music off silences every track. Play when closed keeps the song going after you hide the hub. These choices are saved.", nextOrder())
 		toggleRow(centerHolder, "Music", nextOrder(), state.musicOn ~= false, function()
 			state.musicOn = not state.musicOn
 			if state.savePrefs then
@@ -6121,6 +6122,18 @@ function renderPage()
 				state.setMusic()
 			end
 			pushLog(state.musicOn and "Music on" or "Music off")
+			renderPage()
+		end)
+		toggleRow(centerHolder, "Play when closed", nextOrder(), state.musicClosed == true, function()
+			state.musicClosed = not state.musicClosed
+			state.justToggled = "Play when closed"
+			if state.savePrefs then
+				state.savePrefs()
+			end
+			if state.setMusic then
+				state.setMusic()
+			end
+			pushLog(state.musicClosed and "Music keeps playing when the hub is closed" or "Music pauses when the hub is closed")
 			renderPage()
 		end)
 		toggleRow(centerHolder, "Evil Morty theme", nextOrder(), state.evilAudio == true, function()
@@ -6327,8 +6340,9 @@ corner(window, 12)
 	local function readPrefs()
 		local themeName = "intro"
 		local music = true
+		local closed = false
 		if type(readfile) ~= "function" then
-			return themeName, music
+			return themeName, music, closed
 		end
 		local names = { "voidz-portal/theme.txt", "voidz_portal_theme.txt" }
 		for _, name in ipairs(names) do
@@ -6355,6 +6369,9 @@ corner(window, 12)
 					if string.find(lower, "music=off", 1, true) or string.find(lower, "music=0", 1, true) then
 						music = false
 					end
+					if string.find(lower, "closed=on", 1, true) or string.find(lower, "closed=1", 1, true) then
+						closed = true
+					end
 					for key, value in string.gmatch(body, "([%a]+)=([%w]+)") do
 						local slot = string.lower(key)
 						local known = value == "None"
@@ -6367,16 +6384,17 @@ corner(window, 12)
 							state.binds[slot] = value
 						end
 					end
-					return themeName, music
+					return themeName, music, closed
 				end
 			end
 		end
-		return themeName, music
+		return themeName, music, closed
 	end
-	local themeName, musicOn = readPrefs()
+	local themeName, musicOn, musicClosed = readPrefs()
 	state.souljaAudio = themeName == "soulja"
 	state.evilAudio = themeName == "evil"
 	state.musicOn = musicOn
+	state.musicClosed = musicClosed == true
 	state.introId = introId
 	state.souljaId = souljaId
 	state.evilId = evilId
@@ -6396,6 +6414,7 @@ corner(window, 12)
 		end
 		local binds = state.binds or {}
 		local body = "theme=" .. picked .. "\nmusic=" .. ((state.musicOn ~= false) and "on" or "off")
+			.. "\nclosed=" .. (state.musicClosed and "on" or "off")
 			.. "\nfly=" .. (binds.fly or "Minus")
 			.. "\nspeed=" .. (binds.speed or "None")
 			.. "\nmats=" .. (binds.mats or "None")
@@ -6715,7 +6734,7 @@ corner(window, 12)
 		elseif state.evilAudio and state.evilId then
 			id = state.evilId
 		end
-		local open = window.Visible and state.musicOn ~= false
+		local open = state.musicOn ~= false and (window.Visible or state.musicClosed)
 		theme:Pause()
 		theme.SoundId = id
 		theme.Looped = true
@@ -6752,7 +6771,7 @@ corner(window, 12)
 				state.themeAt = theme.TimePosition
 				theme:Pause()
 			end
-		elseif window.Visible then
+		elseif window.Visible or state.musicClosed then
 			resumeTheme()
 		end
 	end
@@ -6774,7 +6793,7 @@ corner(window, 12)
 		keepChat()
 		if window.Visible then
 			state.hubBusy = true
-			if theme.IsPlaying then
+			if theme.IsPlaying and not state.musicClosed then
 				state.themeAt = theme.TimePosition
 				theme:Pause()
 			end

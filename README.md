@@ -4,7 +4,7 @@
 loadstring(game:HttpGet("https://raw.githubusercontent.com/fungamer1234/voidz-portal/main/VOIDZ_PORTAL.lua", true))()
 ```
 
-Build `2026-10-29-1.6.41`
+Build `2026-10-30-1.6.42`
 
 Game: [Portal Sandbox](https://www.roblox.com/games/75108253383447/Portal-Sandbox). PlaceId `75108253383447`.
 
@@ -18,7 +18,7 @@ A copy of the same file is at `Documents/MacsploitUI/scripts/VOIDZ_PORTAL.lua` i
 
 ## Tabs
 
-Home lists every tab and the activity log. Click a row to open that tab. The open tab uses the theme color. The normal theme is the green Rick and Morty portal, Rick in the swirl, and the intro song. Settings can turn on Evil Morty, which uses the gold gradient, your Evil Morty photo in the portal, and that song, or Soulja Boy, which changes the song only. Turning a theme off returns the green portal, Rick, and the intro. Music off silences every track. Those choices are saved and come back the next time you execute. The songs loop, and closing the hub pauses the current one. The pictures and tracks are loaded from `Documents/Macsploit Workspace/voidz-portal/`.
+Home lists every tab and the activity log. Click a row to open that tab. The open tab uses the theme color. The normal theme is the green Rick and Morty portal, Rick in the swirl, and the intro song. Settings can turn on Evil Morty, which uses the gold gradient, your Evil Morty photo in the portal, and that song, or Soulja Boy, which changes the song only. Turning a theme off returns the green portal, Rick, and the intro. Music off silences every track. Play when closed keeps the song going after you hide the hub. Those choices are saved and come back the next time you execute. The songs loop. Closing the hub pauses the current song unless Play when closed is on. The pictures and tracks are loaded from `Documents/Macsploit Workspace/voidz-portal/`.
 
 - **Move.** Fly, noclip, walk speed, infinite jump, click teleport, and anti void. Minus toggles fly. Walk speed moves you at the number you set, because the game was ignoring the normal walk value. It stays off while fly, auto kill, a teleport, or a mech grab is active. The hub scales open and closed, pages slide in, and toggles slide when you turn them on or off.
 - **Teleport.** Home base is the house you spawned at. You can also save a mark, jump forward, jump up, jump to a random nearby spot, or teleport to the selected player or a random player. These stay in the current world.
@@ -27,7 +27,7 @@ Home lists every tab and the activity log. Click a row to open that tab. The ope
 - **Visuals.** Client-side player highlights, fullbright, and field of view.
 - **Players.** The list on the right selects a player. The selected card uses the theme color and is labeled SELECTED. Your own card says YOU and cannot be selected. Click a selected card again, or press Unselect, to clear it. Teleport, spectate, auto kill, and bring use that player while their character is in the world, even if the health number reads 0. Teleport follows their torso instead of a one-time jump.
 - **Misc.** Bring grabs the selected player with the robo arms. Stand within about 28 studs. When the arms grab them, it teleports that player away by the distance you set (80 studs by default, up to 200). It sends V only when the arms are not already out, it does not press the mech blaster, and it does not move you. If the grab does not give control of that player, the log says so. Freeze walk lets you walk after a freeze gun locks you. Parry teleports you behind a player who has a weapon out, or who just shot you, then keeps teleporting in a circle around them.
-- **Settings.** Keybinds cover fly, walk speed, auto collect, zone route, and keep away. Minus is fly until you change it. Unload script turns off every feature the hub enabled, restores your character, camera, lighting, and field of view, and removes the window.
+- **Settings.** Keybinds cover fly, walk speed, auto collect, zone route, and keep away. Minus is fly until you change it. Play when closed keeps the theme song playing after the hub is hidden. Unload script turns off every feature the hub enabled, restores your character, camera, lighting, and field of view, and removes the window.
 
 Phasing checks your character a few times a second, keep away looks for nearby players on that same pace, and the window glow does not repaint every frame. Home when hurt still snaps as soon as you are pulled away from the house.
 
